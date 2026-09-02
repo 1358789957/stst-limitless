@@ -35,9 +35,9 @@ export const CHARS: CharDef[] = [
     line: "吾乃最强。",
     domainName: "无量空域",
     hitLine: "碰到了。无极呢？",
-    kit: ["无极被动", "苍主动", "赫", "虚式", "咒痕"],
+    kit: ["无下限被动", "拳脚平A", "六赫", "虚式", "锻造器"],
     dashName: "瞬移",
-    dashHint: "Q 踏步。左键苍。右键走。",
+    dashHint: "Q 踏步。左键拳脚。右键走。",
   },
   {
     id: "sukuna",
@@ -54,7 +54,7 @@ export const CHARS: CharDef[] = [
     hitLine: "被摸到了。开。",
     kit: ["捌被动", "解主动", "开", "厨刀", "魔虚罗"],
     dashName: "瞬斩",
-    dashHint: "Q 瞬斩。左键解。右键走。",
+    dashHint: "Q 瞬斩。左键解。右键走。升级只加血。",
     unlockHint: "先活一场。",
   },
 ];

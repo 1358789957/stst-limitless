@@ -1,130 +1,115 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  craftId,
+  anvilChainChance,
+  anvilPool,
   emptyWeps,
-  makeOffer,
+  forgeDamageMul,
+  isAnvilId,
+  isMutationId,
+  levelHp,
+  MAX_ANVIL_CHAIN,
+  MUTATION_IDS,
   rollPicks,
-  spotlightId,
+  shopClosesOn,
+  shouldChainAnvil,
   UPGRADES,
 } from "./upgrades.ts";
 
-const zero = () => 0;
+function seq(vals: number[]) {
+  let i = 0;
+  return () => vals[i++ % vals.length]!;
+}
 
-describe("upgrade picks", () => {
-  it("gives each technique distinct rank steps", () => {
+describe("forge bags", () => {
+  it("gives each card distinct rank copy", () => {
     for (const u of UPGRADES) {
-      const lines = Array.from({ length: u.max }, (_, i) => u.desc(i + 1));
+      const lines = Array.from({ length: u.max }, (_, n) => u.desc(n + 1));
       assert.equal(new Set(lines).size, u.max, u.id);
     }
   });
 
-  it("spotlights purple then domain for Gojo", () => {
-    const weps = emptyWeps();
-    weps.limitless = 1;
-    weps.blue = 1;
-    assert.equal(spotlightId("gojo", weps, 10, 4), null);
-    assert.equal(spotlightId("gojo", weps, 60, 5), "purple");
-    weps.purple = 1;
-    assert.equal(spotlightId("gojo", weps, 100, 7), "domain");
+  it("level only thickens HP", () => {
+    assert.equal(levelHp(1), 100);
+    assert.equal(levelHp(2), 114);
+    assert.equal(levelHp(5), 156);
   });
 
-  it("spotlights cleave then flame for Sukuna", () => {
+  it("damage mul is anvil stacks, not level", () => {
+    assert.equal(forgeDamageMul(0), 1);
+    assert.equal(forgeDamageMul(1), 1.15);
+    assert.equal(forgeDamageMul(2), 1.3);
+  });
+
+  it("anvil pool is 伤害+频率; Gojo also gets Infinity knobs", () => {
+    const g = emptyWeps();
+    g.limitless = 1;
+    const gojo = anvilPool("gojo", g, 10, 2);
+    assert.ok(gojo.includes("power"));
+    assert.ok(gojo.includes("rate"));
+    assert.ok(gojo.includes("infCap"));
+    assert.ok(gojo.includes("infRad"));
+    assert.ok(!gojo.includes("blue"));
+    const late = anvilPool("gojo", g, 60, 5);
+    assert.ok(late.includes("blue"));
+
+    const s = emptyWeps();
+    s.slash = 1;
+    s.cleave = 1;
+    const sukuna = anvilPool("sukuna", s, 10, 2);
+    assert.deepEqual(sukuna.sort(), ["power", "rate"]);
+  });
+
+  it("mixes 专属 and 质变 without forcing one of each", () => {
     const weps = emptyWeps();
+    weps.limitless = 1;
+    weps.fist = 1;
+    const a = rollPicks("gojo", weps, 8, 2, seq([0.01, 0, 0.01, 0, 0.01, 0]));
+    const b = rollPicks("gojo", weps, 8, 2, seq([0.7, 0, 0.7, 0.2, 0.7, 0.4]));
+    assert.equal(a.length, 3);
+    assert.equal(b.length, 3);
+    assert.ok(a.every((p) => p.tag === "专属" || p.tag === "质变" || p.tag === "支援" || p.tag === "术域" || p.tag === "合成"));
+    assert.ok(!a.some((p) => /苍\+1|解\+1|赫\+1/.test(`${p.name}${p.desc}`)));
+  });
+
+  it("never offers a skill-rank +damage card", () => {
+    const weps = emptyWeps();
+    weps.limitless = 1;
+    weps.fist = 1;
     weps.slash = 1;
     weps.cleave = 1;
-    assert.equal(spotlightId("sukuna", weps, 10, 3), null);
-    assert.equal(spotlightId("sukuna", weps, 65, 5), "flame");
+    for (let i = 0; i < 20; i++) {
+      const picks = rollPicks("gojo", weps, 20, 3, () => (i * 17 + 3) % 100 / 100);
+      for (const p of picks) {
+        assert.ok(p.id !== "fist");
+        assert.ok(!/^苍\+/.test(p.name));
+        assert.ok(!/^解\+/.test(p.name));
+        assert.ok(!/^赫\+/.test(p.name));
+      }
+    }
   });
 
-  it("early 3-pick forks new verbs instead of tiny bumps", () => {
-    const weps = emptyWeps();
-    weps.limitless = 1;
-    const picks = rollPicks("gojo", weps, 20, 2, zero);
-    assert.equal(picks.length, 3);
-    const fresh = picks.filter((p) => p.tag === "新术");
-    assert.ok(fresh.length >= 2);
-    assert.ok(fresh.some((p) => p.id === "blue"));
-    assert.ok(fresh.some((p) => p.id === "red" || p.id === "clone"));
-    assert.ok(!picks.some((p) => p.id === "domain"));
-    const ids = new Set(picks.map((p) => p.id));
-    assert.equal(ids.size, 3);
+  it("质变 closes the shop; 专属 can chain", () => {
+    assert.equal(shopClosesOn("split"), true);
+    assert.equal(shopClosesOn("more"), true);
+    assert.equal(shopClosesOn("power"), false);
+    assert.equal(shopClosesOn("rate"), false);
+    assert.equal(shopClosesOn("infCap"), false);
+    assert.equal(isAnvilId("power"), true);
+    assert.equal(isMutationId("linger"), true);
   });
 
-  it("always includes the mid spotlight in a 3-pick", () => {
-    const weps = emptyWeps();
-    weps.limitless = 1;
-    weps.blue = 2;
-    const picks = rollPicks("gojo", weps, 60, 5, zero);
-    assert.equal(picks.length, 3);
-    assert.ok(picks.some((p) => p.id === "purple"));
+  it("chain chance drops and caps at 3 extras", () => {
+    assert.ok(anvilChainChance(0) > anvilChainChance(1));
+    assert.ok(anvilChainChance(1) > anvilChainChance(2));
+    assert.equal(anvilChainChance(3), 0);
+    assert.equal(MAX_ANVIL_CHAIN, 3);
+    assert.equal(shouldChainAnvil(0, () => 0), true);
+    assert.equal(shouldChainAnvil(0, () => 0.99), false);
+    assert.equal(shouldChainAnvil(3, () => 0), false);
   });
 
-  it("deepens an owned skill when last pick is set", () => {
-    const weps = emptyWeps();
-    weps.limitless = 1;
-    weps.blue = 1;
-    const picks = rollPicks("gojo", weps, 40, 3, zero, "blue");
-    assert.ok(picks.some((p) => p.id === "blue" && p.tag === "进化" && p.from === 1 && p.to === 2));
-  });
-
-  it("offers 合成 when 苍 and 赫 are both rank 2+", () => {
-    const weps = emptyWeps();
-    weps.limitless = 1;
-    weps.blue = 2;
-    weps.red = 2;
-    assert.equal(craftId("gojo", weps), "purple");
-    const picks = rollPicks("gojo", weps, 70, 5, zero);
-    const craft = picks.find((p) => p.tag === "合成");
-    assert.ok(craft);
-    assert.equal(craft!.id, "purple");
-    assert.match(craft!.name, /合成/);
-  });
-
-  it("offers 开·合成 when 解 and 捌 are both rank 2+", () => {
-    const weps = emptyWeps();
-    weps.slash = 2;
-    weps.cleave = 2;
-    const picks = rollPicks("sukuna", weps, 70, 5, zero);
-    assert.ok(picks.some((p) => p.id === "flame" && p.tag === "合成"));
-  });
-
-  it("makeOffer writes the next rank change", () => {
-    const weps = emptyWeps();
-    weps.blue = 1;
-    const o = makeOffer("blue", weps);
-    assert.equal(o.tag, "进化");
-    assert.match(o.desc, /两颗/);
-    assert.equal(o.to, 2);
-  });
-
-  it("puts 咒痕 and 扫射 in Gojo's verb pool", () => {
-    const weps = emptyWeps();
-    weps.limitless = 1;
-    const picks = rollPicks("gojo", weps, 35, 3, () => 0.4);
-    const ids = picks.map((p) => p.id);
-    assert.ok(ids.some((id) => id === "ripple" || id === "ray" || id === "blue" || id === "red"));
-    const weps2 = emptyWeps();
-    weps2.limitless = 2;
-    weps2.blue = 1;
-    const later = rollPicks("gojo", weps2, 50, 4, () => 0);
-    assert.ok(later.some((p) => p.id === "ripple" || p.id === "ray" || p.tag === "新术"));
-  });
-
-  it("keeps 魔虚罗 on Sukuna only", () => {
-    const weps = emptyWeps();
-    weps.slash = 1;
-    weps.cleave = 1;
-    const picks = rollPicks("sukuna", weps, 40, 3, () => 0.5);
-    const gojo = rollPicks("gojo", emptyWeps(), 40, 3, () => 0.5);
-    assert.ok(UPGRADES.some((u) => u.id === "adapt" && u.who.includes("sukuna")));
-    assert.ok(!gojo.some((p) => p.id === "adapt"));
-    assert.ok(picks.length <= 3);
-  });
-
-  it("returns an empty pool when everything is maxed", () => {
-    const weps = emptyWeps();
-    for (const id of Object.keys(weps) as (keyof typeof weps)[]) weps[id] = 99;
-    assert.deepEqual(rollPicks("gojo", weps, 100, 20), []);
+  it("six mutations exist", () => {
+    assert.deepEqual(MUTATION_IDS, ["split", "focus", "chain", "more", "size", "linger"]);
   });
 });

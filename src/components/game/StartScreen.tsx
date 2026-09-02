@@ -201,7 +201,7 @@ export function StartScreen({
           <p className="text-xs text-mute">
             {archive
               ? "割完再翻。纸比人老实。"
-              : `右键点地走。Q ${cur.dashName}，E ${cur.id === "gojo" ? "虚式" : "开"}，R 术域 · 活过 ${formatClock(CLEAR_TIME)}`}
+              : `右键走，按住左键${cur.id === "gojo" ? "拳脚" : "解"}。Q ${cur.dashName}，E ${cur.id === "gojo" ? "虚式" : "开"}，R 术域 · 活过 ${formatClock(CLEAR_TIME)}`}
           </p>
           <button
             type="button"

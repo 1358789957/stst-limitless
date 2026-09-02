@@ -11,7 +11,23 @@ import {
   sfxSkill,
 } from "./audio.ts";
 import { CHAR_MAP, type CharId } from "./characters.ts";
-import { emptyWeps, rollPicks, UPGRADE_MAP, type Offer, type UpgradeId } from "./upgrades.ts";
+import {
+  emptyWeps,
+  fieldMuts,
+  forgeDamageMul,
+  forgeRateMul,
+  isAnvilId,
+  LEVEL_HP,
+  levelHp,
+  MAX_ANVIL_CHAIN,
+  rollPicks,
+  shapeMul,
+  shopClosesOn,
+  shouldChainAnvil,
+  UPGRADE_MAP,
+  type Offer,
+  type UpgradeId,
+} from "./upgrades.ts";
 
 export const WORLD = 2200;
 export const CLEAR_TIME = 180;
@@ -19,18 +35,24 @@ export const DASH_COOLDOWN = 2.15;
 export const ARRIVE = 12;
 export const EXTRA_START: Record<CharId, UpgradeId> = {
   gojo: "red",
-  sukuna: "blades",
+  sukuna: "cleave",
 };
 
 export const ACTIVE_START: Record<CharId, UpgradeId> = {
-  gojo: "blue",
+  gojo: "fist",
   sukuna: "slash",
 };
 
 export const STARTERS: Record<CharId, UpgradeId[]> = {
-  gojo: ["limitless", "blue"],
+  gojo: ["limitless", "fist"],
   sukuna: ["slash", "cleave"],
 };
+
+export const PUNCH_BASE = 3.2;
+export const RED_BASE = 0.72;
+export const BLUE_BASE = 2.4;
+export const SLASH_BASE = 3.4;
+export const CLEAVE_PCT = 0.03;
 
 const MAX_E = 200;
 const MAX_B = 280;
@@ -180,12 +202,16 @@ function domainCdFor(d: number) {
   return [0, 22, 18, 15][Math.min(3, Math.max(0, d))] ?? 22;
 }
 
-function redCdFor(r: number) {
-  return [0, 1.15, 1.0, 0.88, 0.78][Math.min(4, Math.max(0, r))] ?? 1.15;
+function redCdFor(rate: number) {
+  return 1.15 / forgeRateMul(rate);
 }
 
-function cleaveCdFor(c: number) {
-  return [0, 0.72, 0.62, 0.54, 0.46][Math.min(4, Math.max(0, c))] ?? 0.72;
+function blueCdFor(rate: number) {
+  return 0.85 / forgeRateMul(rate);
+}
+
+function cleaveCdFor(rate: number) {
+  return 0.72 / forgeRateMul(rate);
 }
 
 function flameCdFor(f: number) {
@@ -200,12 +226,19 @@ function beamCdFor(lv: number) {
   return [0, 1.7, 1.5, 1.35, 1.2][Math.min(4, Math.max(0, lv))] ?? 1.7;
 }
 
-function blueCdFor(lv: number) {
-  return [0, 0.48, 0.42, 0.36, 0.3][Math.min(4, Math.max(0, lv))] ?? 0.48;
+function punchCdFor(rate: number) {
+  return 0.34 / forgeRateMul(rate);
 }
 
-function slashCdFor(lv: number) {
-  return [0, 0.4, 0.36, 0.32, 0.28][Math.min(4, Math.max(0, lv))] ?? 0.4;
+function slashCdFor(rate: number) {
+  return 0.4 / forgeRateMul(rate);
+}
+
+function angDiff(a: number, b: number) {
+  let d = a - b;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return Math.abs(d);
 }
 
 function clamp(v: number, a: number, b: number) {
@@ -269,6 +302,8 @@ export type HudSnap = {
     held: DmgKind | null;
     turns: number;
   } | null;
+  anvilChain: number;
+  forgeChain: boolean;
 };
 
 export type SkillSlot = {
@@ -394,6 +429,11 @@ export class HordeSim {
   adaptTurns = 0;
   adaptPulse = 0;
   lastHurt: DmgKind | null = null;
+  anvilChain = 0;
+  pendingShops = 0;
+  forgeChain = false;
+  forgeRng: () => number = Math.random;
+  punchHits = 0;
 
   enemies: Enemy[] = [];
   bullets: Bullet[] = [];
@@ -443,10 +483,18 @@ export class HordeSim {
     this.shake = 0;
     this.line = ch.line;
     this.weps = emptyWeps();
-    this.weps[ch.start as UpgradeId] = 1;
-    if (this.charId === "gojo") this.weps.blue = Math.max(1, this.weps.blue);
-    else this.weps.cleave = Math.max(1, this.weps.cleave);
-    if (this.extraStart) this.weps[EXTRA_START[this.charId]] = Math.max(1, this.weps[EXTRA_START[this.charId]]);
+    if (this.charId === "gojo") {
+      this.weps.limitless = 1;
+      this.weps.fist = 1;
+    } else {
+      this.weps.slash = 1;
+      this.weps.cleave = 1;
+    }
+    if (this.extraStart && this.charId === "gojo") this.weps.red = 1;
+    this.anvilChain = 0;
+    this.pendingShops = 0;
+    this.forgeChain = false;
+    this.punchHits = 0;
     this.cd = {};
     this.domainCd = 0;
     this.dashCd = 0;
@@ -658,11 +706,15 @@ export class HordeSim {
       shellLeak: this.shellLeak,
       bfWindow: this.bfWindow,
       bfBuff: this.bfBuff,
-      activeName: this.charId === "gojo" ? "苍" : "解",
-      activeCd: this.charId === "gojo" ? (this.cd.blue ?? 0) : (this.cd.slash ?? 0),
-      activeMax: this.charId === "gojo" ? blueCdFor(this.weps.blue) : slashCdFor(this.weps.slash),
+      activeName: this.charId === "gojo" ? "拳脚" : "解",
+      activeCd: this.charId === "gojo" ? (this.cd.punch ?? 0) : (this.cd.slash ?? 0),
+      activeMax: this.charId === "gojo" ? punchCdFor(this.weps.rate) : slashCdFor(this.weps.rate),
       activeReady:
-        this.charId === "gojo" ? this.weps.blue > 0 && (this.cd.blue ?? 0) <= 0 : this.weps.slash > 0 && (this.cd.slash ?? 0) <= 0,
+        this.charId === "gojo"
+          ? (this.cd.punch ?? 0) <= 0
+          : this.weps.slash > 0 && (this.cd.slash ?? 0) <= 0,
+      anvilChain: this.anvilChain,
+      forgeChain: this.forgeChain,
       adapt:
         this.charId === "sukuna" && this.weps.adapt > 0
           ? {
@@ -684,7 +736,7 @@ export class HordeSim {
     const eId: UpgradeId = gojo ? "purple" : "flame";
     const wLv = this.weps[wId];
     const eLv = this.weps[eId];
-    const wMax = gojo ? redCdFor(wLv) : cleaveCdFor(wLv);
+    const wMax = gojo ? redCdFor(this.weps.rate) : cleaveCdFor(this.weps.rate);
     const eMax = gojo ? purpleCdFor(eLv) : flameCdFor(eLv);
     const wCd = this.cd[wId] ?? 0;
     const eCd = gojo ? this.purpleCd : (this.cd.flame ?? 0);
@@ -750,10 +802,40 @@ export class HordeSim {
     this.weps[id] = Math.min(def.max, lv);
     this.lastPick = id;
     this.applyStats();
-    this.picks = null;
-    this.paused = this.userPaused;
-    this.line = offer ? `${offer.name}。${offer.tag}。` : `${def.name}。`;
+    this.maybeGrantSixRed();
     sfxLevel();
+    if (shopClosesOn(id)) {
+      this.line = offer ? `${offer.name}。质变收口。` : `${def.name}。收口。`;
+      this.closeShop();
+      return;
+    }
+    if (isAnvilId(id)) {
+      if (this.anvilChain >= MAX_ANVIL_CHAIN) {
+        this.line = `${def.name}。砧满了。`;
+        this.closeShop();
+        return;
+      }
+      if (shouldChainAnvil(this.anvilChain, this.forgeRng)) {
+        this.anvilChain += 1;
+        this.forgeChain = true;
+        this.line = `${def.name}。连抽。再锻。`;
+        this.offer({ resume: true });
+        return;
+      }
+      this.line = `${def.name}。专属入砧。`;
+      this.closeShop();
+      return;
+    }
+    this.closeShop();
+  }
+
+  closeShop() {
+    this.picks = null;
+    this.anvilChain = 0;
+    this.forgeChain = false;
+    this.pendingShops = Math.max(0, this.pendingShops - 1);
+    if (this.pendingShops > 0) this.offer();
+    else this.paused = this.userPaused;
   }
 
   applyStats() {
@@ -765,7 +847,7 @@ export class HordeSim {
     this.crit = Math.min(0.22, 0.06 + f * 0.03);
     this.critDmg = 2.1 + f * 0.12;
     this.regen = r * 2.2;
-    this.maxHp = 100 + r * 18;
+    this.maxHp = levelHp(this.lv) + r * 18;
     this.hp = Math.min(this.maxHp, this.hp);
     this.speed = 200 * (1 + s * 0.2);
     this.shellCap = this.shellCapacity();
@@ -792,34 +874,45 @@ export class HordeSim {
     return 1.65 + this.weps.flash * 0.42;
   }
 
+  verbDmg(base: number) {
+    return base * forgeDamageMul(this.weps.power) * shapeMul(this.weps);
+  }
+
+  maybeGrantSixRed() {
+    if (this.charId !== "gojo" || this.weps.red >= 1) return;
+    if (this.lv >= 2 || this.time >= 20) {
+      this.weps.red = 1;
+      this.line = "六赫。自己会打。";
+    }
+  }
+
   shellRadius() {
-    const L = this.weps.limitless;
-    if (this.charId !== "gojo" || L < 1) return 0;
-    return 56 + (L - 1) * 16;
+    if (this.charId !== "gojo" || this.weps.limitless < 1) return 0;
+    return 56 + this.weps.infRad * 14 + this.weps.linger * 8 + this.weps.size * 4;
   }
 
   shellCapacity() {
-    const L = this.weps.limitless;
-    return [0, 5.2, 8.6, 13.4, 20][Math.min(4, Math.max(0, L))] ?? 5.2;
+    if (this.charId !== "gojo") return 1;
+    return 24 + this.weps.infCap * 10;
   }
 
   shellRegen() {
-    const L = this.weps.limitless;
-    return [0, 5.8, 8.4, 12.2, 18][Math.min(4, Math.max(0, L))] ?? 5.8;
+    if (this.charId !== "gojo") return 1;
+    return 16 + this.weps.infCap * 5;
   }
 
   fieldDps() {
-    const L = this.weps.limitless;
-    const late = this.time > 100 ? 3.2 : this.time > 60 ? 1.2 : 0;
-    return 4.2 + L * 1.4 + late;
+    const punchDps = this.verbDmg(PUNCH_BASE) / punchCdFor(this.weps.rate);
+    return punchDps * 0.2;
   }
 
   enemyMass(e: Enemy) {
     if (e.kind === 3) return 5;
     if (e.kind === 2) return e.elite ? 5 : 3.4;
     if (e.elite) return 4;
-    if (e.kind === 1) return 1.35;
-    return 1;
+    const late = this.time / 90 * 0.2 + (this.time > 45 && fieldMuts(this.weps) < 1 ? 0.35 : 0);
+    if (e.kind === 1) return 0.55 + late;
+    return 0.22 + late;
   }
 
   sureHit(e: Enemy) {
@@ -831,17 +924,13 @@ export class HordeSim {
   }
 
   cleaveCut(e: Enemy) {
-    const r = this.weps.cleave;
-    const pct = [0, 0.44, 0.52, 0.6, 0.68][Math.min(4, Math.max(0, r))] ?? 0.44;
+    const pct = (CLEAVE_PCT + 0.004 * this.weps.power) * shapeMul(this.weps);
     let harden = 1;
     if (e.kind === 1) harden = 0.74;
     if (e.kind === 2) harden = 0.58;
     if (e.kind === 3) harden = 0.15;
     if (e.elite && e.kind !== 3) harden *= 0.5;
-    const raw = e.max * pct * harden;
-    const floor = 3.5 + r;
-    const cap = e.kind === 3 ? e.max * (0.06 + r * 0.012) : e.max * 0.82;
-    return clamp(raw, floor, cap);
+    return e.max * pct * harden;
   }
 
   adaptFactor(kind: DmgKind) {
@@ -976,39 +1065,82 @@ export class HordeSim {
     const ang = this.aimAng();
     this.facing = ang;
     this.yaw = Math.atan2(-Math.cos(ang), -Math.sin(ang));
-    if (this.charId === "gojo") this.fireBlue(ang);
+    if (this.charId === "gojo") this.firePunch(ang);
     else this.fireSlash(ang);
   }
 
-  fireBlue(ang: number) {
-    const B = this.weps.blue;
-    if (B < 1) return;
-    if (!this.readyCd("blue", blueCdFor(B))) return;
-    const n = B >= 4 ? 3 : B >= 2 ? 2 : 1;
-    const size = 8 + B * 3.2;
-    const pierce = B >= 3 ? 1 : 0;
-    for (let i = 0; i < n; i++) {
-      const a = ang + (i - (n - 1) / 2) * 0.2;
-      this.shot(0, this.x, this.y, Math.cos(a) * 280, Math.sin(a) * 280, 10 + B * 4, 2.4, pierce, 0.4, size);
+  firePunch(ang: number) {
+    if (!this.readyCd("punch", punchCdFor(this.weps.rate))) return;
+    this.punchHits += 1;
+    const reach = 48 + this.weps.linger * 12;
+    const wide = 0.7 + this.weps.size * 0.1;
+    const dmg = this.verbDmg(PUNCH_BASE);
+    const focus = this.weps.focus >= 1;
+    const extra = focus ? 0 : this.weps.more;
+    const forks = focus ? 0 : this.weps.split;
+    for (let i = 0; i <= extra; i++) this.punchStrike(ang, reach, wide, dmg);
+    for (let i = 0; i < forks; i++) {
+      const off = (i - (forks - 1) / 2) * 0.32;
+      this.punchStrike(ang + off, reach, wide, dmg * 0.7);
     }
-    sfxSkill("blue");
+    this.pushFx(this.x + Math.cos(ang) * 22, this.y + Math.sin(ang) * 22, 18 + this.weps.size * 4, 0.16, 1, "", false, ang);
+    sfxHit();
+  }
+
+  punchStrike(ang: number, reach: number, wide: number, dmg: number) {
+    let hit: Enemy | null = null;
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const dx = e.x - this.x;
+      const dy = e.y - this.y;
+      const d = Math.hypot(dx, dy);
+      if (d > reach + e.r) continue;
+      if (angDiff(Math.atan2(dy, dx), ang) > wide) continue;
+      this.hurtEnemy(e, dmg, (dx / (d || 1)) * 40, (dy / (d || 1)) * 40, false, "none");
+      hit = e;
+    }
+    if (hit && this.weps.chain > 0) {
+      this.queueHop(hit.x, hit.y, this.weps.chain, dmg * 0.75, 1, 96 + this.weps.linger * 18);
+    }
+  }
+
+  fireBlue() {
+    if (this.weps.blue < 1) return;
+    if (!this.readyCd("blue", blueCdFor(this.weps.rate))) return;
+    const t = this.nearest(this.x, this.y);
+    const ang = t ? Math.atan2(t.y - this.y, t.x - this.x) : this.facing;
+    const focus = this.weps.focus >= 1;
+    const n = focus ? 1 : 1 + this.weps.more;
+    const dmg = this.verbDmg(BLUE_BASE);
+    const size = (focus ? 16 : 8) * (1 + this.weps.size * 0.18);
+    const life = 2.2 + this.weps.linger * 0.2;
+    const forks = focus ? 0 : this.weps.split;
+    for (let i = 0; i < n; i++) {
+      const a = ang + (i - (n - 1) / 2) * 0.18;
+      this.shot(0, this.x, this.y, Math.cos(a) * 280, Math.sin(a) * 280, dmg, life, 0, 0.45, size);
+    }
+    for (let i = 0; i < forks; i++) {
+      const a = ang + (i - (forks - 1) / 2) * 0.28;
+      this.shot(0, this.x, this.y, Math.cos(a) * 260, Math.sin(a) * 260, dmg * 0.7, life, 0, 0.4, size * 0.85);
+    }
   }
 
   fireSlash(ang: number) {
-    const S = this.weps.slash;
-    if (S < 1) return;
-    if (!this.readyCd("slash", slashCdFor(S))) return;
-    const n = S >= 4 ? 2 : S >= 2 ? 2 : 1;
-    const size = 12 + S * 3.4;
-    const pierce = S >= 3 ? 2 : 0;
+    if (this.weps.slash < 1) return;
+    if (!this.readyCd("slash", slashCdFor(this.weps.rate))) return;
+    const focus = this.weps.focus >= 1;
+    const n = focus ? 1 : 1 + this.weps.more;
+    const dmg = this.verbDmg(SLASH_BASE);
+    const size = (focus ? 20 : 12) * (1 + this.weps.size * 0.18);
+    const life = 0.42 + this.weps.linger * 0.08;
+    const forks = focus ? 0 : this.weps.split;
     for (let i = 0; i < n; i++) {
-      const a = ang + (i - (n - 1) / 2) * 0.22;
-      this.shot(4, this.x, this.y, Math.cos(a) * 520, Math.sin(a) * 520, 12 + S * 3.6, 0.44 + S * 0.03, pierce, 0, size);
+      const a = ang + (i - (n - 1) / 2) * 0.2;
+      this.shot(4, this.x, this.y, Math.cos(a) * 520, Math.sin(a) * 520, dmg, life, 0, 0, size);
     }
-    if (S >= 4) {
-      const cross = ang + Math.PI / 2;
-      this.shot(4, this.x, this.y, Math.cos(cross) * 500, Math.sin(cross) * 500, 12 + S * 3, 0.4, 1, 0, size);
-      this.shot(4, this.x, this.y, Math.cos(cross + Math.PI) * 500, Math.sin(cross + Math.PI) * 500, 12 + S * 3, 0.4, 1, 0, size);
+    for (let i = 0; i < forks; i++) {
+      const a = ang + (i - (forks - 1) / 2) * 0.3;
+      this.shot(4, this.x, this.y, Math.cos(a) * 500, Math.sin(a) * 500, dmg * 0.7, life, 0, 0, size * 0.85);
     }
   }
 
@@ -1055,6 +1187,7 @@ export class HordeSim {
     }
     const step = Math.min(dt, 0.05);
     this.time += step;
+    this.maybeGrantSixRed();
     this.anim += step;
     this.invuln = Math.max(0, this.invuln - step);
     this.freeze = Math.max(0, this.freeze - step);
@@ -1232,32 +1365,33 @@ export class HordeSim {
   }
 
   volleyRed() {
-    const R = this.weps.red;
-    if (R < 1) return;
-    if (!this.readyCd("red", redCdFor(R))) return;
-    const n = [0, 3, 5, 5, 7][Math.min(4, R)] ?? 3;
-    const size = 4.2 + R * 1.35;
+    if (this.weps.red < 1) return;
+    if (!this.readyCd("red", redCdFor(this.weps.rate))) return;
+    const t = this.nearest(this.x, this.y);
+    const baseAng = t ? Math.atan2(t.y - this.y, t.x - this.x) : this.facing;
+    const focus = this.weps.focus >= 1;
+    const n = focus ? 1 : 6 + this.weps.more;
+    const dmg = this.verbDmg(RED_BASE);
+    const size = (focus ? 10 : 4.2) * (1 + this.weps.size * 0.18);
+    const life = 0.55 + this.weps.linger * 0.06;
+    const forks = focus ? 0 : this.weps.split;
     for (let i = 0; i < n; i++) {
-      const spread = (i - (n - 1) / 2) * (R >= 2 ? 0.2 : 0.14);
-      const ang = this.facing + spread;
-      this.shot(1, this.x, this.y, Math.cos(ang) * 430, Math.sin(ang) * 430, 9 + R * 3, 0.55, 0, 0, size);
+      const spread = (i - (n - 1) / 2) * (focus ? 0 : 0.16);
+      const ang = baseAng + spread;
+      this.shot(1, this.x, this.y, Math.cos(ang) * 430, Math.sin(ang) * 430, dmg, life, 0, 0, size);
     }
-    if (R >= 4) {
-      for (let i = -1; i <= 1; i++) {
-        const ang = this.facing + i * 0.1;
-        this.shot(1, this.x, this.y, Math.cos(ang) * 390, Math.sin(ang) * 390, 10, 0.5, 0, 0, size * 0.85);
-      }
+    for (let i = 0; i < forks; i++) {
+      const ang = baseAng + (i - (forks - 1) / 2) * 0.28;
+      this.shot(1, this.x, this.y, Math.cos(ang) * 400, Math.sin(ang) * 400, dmg * 0.7, life, 0, 0, size * 0.85);
     }
-    this.shake = Math.max(this.shake, R >= 3 ? 5 : 3);
-    sfxSkill("red");
   }
 
   volleyCleave() {
-    const Cl = this.weps.cleave;
-    if (Cl < 1) return;
-    if (!this.readyCd("cleave", cleaveCdFor(Cl))) return;
-    const rad = [0, 54, 70, 88, 108][Math.min(4, Cl)] ?? 54;
-    this.cleave(rad, Math.PI, 0);
+    if (this.weps.cleave < 1) return;
+    if (!this.readyCd("cleave", cleaveCdFor(this.weps.rate))) return;
+    const rad = 54 + this.weps.linger * 16 + this.weps.size * 6;
+    const cap = this.weps.focus >= 1 ? 1 : 1 + this.weps.more;
+    this.cleave(rad, cap);
   }
 
   volleyFlame() {
@@ -1432,14 +1566,8 @@ export class HordeSim {
 
     const tickCd = (id: string, base: number) => this.readyCd(id, base);
 
-    const L = this.weps.limitless;
-    if (L > 0 && tickCd("limitless", L >= 4 ? 0.55 : L >= 3 ? 0.64 : 0.78)) {
-      const rad = this.shellRadius() || 56;
-      this.ringAt(this.x, this.y, rad, 5 + L * 1.6, 0, true);
-      if (L >= 3) this.ringAt(this.x, this.y, rad * 0.55, 4 + L, 0, false);
-    }
-
     if (this.weps.red > 0) this.volleyRed();
+    if (this.weps.blue > 0) this.fireBlue();
 
     const C = this.weps.clone;
     if (C > 0) {
@@ -1452,8 +1580,6 @@ export class HordeSim {
     }
 
     if (this.weps.cleave > 0) this.volleyCleave();
-
-    if (this.weps.flame > 0) this.volleyFlame();
 
     const Ray = this.weps.ray;
     if (Ray > 0 && tickCd("ray", rayCdFor(Ray))) {
@@ -1519,7 +1645,7 @@ export class HordeSim {
     }
   }
 
-  cleave(rad: number, _arc: number, _flat: number) {
+  cleave(rad: number, cap = 1) {
     let hopped = 0;
     let tagged = false;
     this.pushFx(this.x, this.y, rad, 0.28, 8, "", false, this.facing);
@@ -1527,15 +1653,21 @@ export class HordeSim {
       const a = (i / 6) * Math.PI * 2;
       this.pushFx(this.x + Math.cos(a) * (rad * 0.55), this.y + Math.sin(a) * (rad * 0.55), rad * 0.28, 0.2, 9, "", false, a);
     }
-    for (const e of this.enemies) {
-      if (!e.alive) continue;
+    const hits = this.enemies
+      .filter((e) => e.alive && Math.hypot(e.x - this.x, e.y - this.y) <= rad + e.r)
+      .sort((a, b) => Math.hypot(a.x - this.x, a.y - this.y) - Math.hypot(b.x - this.x, b.y - this.y))
+      .slice(0, Math.max(1, cap));
+    const forks = this.weps.focus >= 1 ? 0 : this.weps.split;
+    for (const e of hits) {
       const dx = e.x - this.x;
       const dy = e.y - this.y;
-      const d = Math.hypot(dx, dy);
-      if (d > rad + e.r) continue;
+      const d = Math.hypot(dx, dy) || 1;
       const tag: HitTag = !tagged && this.slashArmed ? "cleave" : "none";
       if (tag === "cleave") tagged = true;
-      this.hurtEnemy(e, this.cleaveCut(e), (dx / (d || 1)) * 70, (dy / (d || 1)) * 70, false, tag);
+      const cut = this.cleaveCut(e);
+      this.hurtEnemy(e, cut, (dx / d) * 70, (dy / d) * 70, false, tag);
+      for (let i = 0; i < forks; i++) this.hurtEnemy(e, cut * 0.7, 0, 0, true, "none");
+      if (this.weps.chain > 0) this.queueHop(e.x, e.y, this.weps.chain, cut * 0.75, 2, 96 + this.weps.linger * 18);
       if (this.weps.plague > 0 && hopped < 2) {
         e.mark = 0.45;
         this.spreadPlague(e.x, e.y);
@@ -1618,8 +1750,11 @@ export class HordeSim {
         const ny = (e.y - b.y) / 8;
         this.hurtEnemy(e, b.dmg, nx * 40, ny * 40, false, b.kind === 4 ? "slash" : "none");
         if (b.kind === 0 && this.weps.ripple > 0) this.spreadRipple(e.x, e.y, false);
-        if (b.kind === 4 && (this.weps.slash >= 3 || this.weps.plague >= 4)) {
-          this.queueHop(e.x, e.y, this.weps.plague >= 4 ? Math.min(3, this.weps.plague) : 1, b.dmg * 0.5, 2, 120);
+        if (this.weps.chain > 0) {
+          this.queueHop(e.x, e.y, this.weps.chain, b.dmg * 0.75, b.kind === 4 ? 2 : 1, 96 + this.weps.linger * 18);
+        }
+        if (b.kind === 4 && this.weps.plague >= 4) {
+          this.queueHop(e.x, e.y, Math.min(3, this.weps.plague), b.dmg * 0.5, 2, 120);
         }
         if (b.kind === 5) {
           const F = this.weps.flame;
@@ -1989,7 +2124,7 @@ export class HordeSim {
       for (const e of this.enemies) {
         if (!e.alive) continue;
         const d = distToSeg(e.x, e.y, this.dx0, this.dy0, this.x, this.y);
-        if (d < e.r + 18 && e.hurt <= 0) this.hurtEnemy(e, 18 + this.weps.slash * 3, 0, 0, false, "dash");
+        if (d < e.r + 18 && e.hurt <= 0) this.hurtEnemy(e, this.verbDmg(8), 0, 0, false, "dash");
       }
     }
     if (u >= 1) {
@@ -2012,8 +2147,8 @@ export class HordeSim {
     const size = 12 + P * 4.2;
     const vx = Math.cos(ang) * 720;
     const vy = Math.sin(ang) * 720;
-    this.shot(2, this.x, this.y, vx, vy, 40 + P * 14, 0.78, 14, 0, size);
-    if (P >= 4) {
+    this.shot(2, this.x, this.y, vx, vy, this.verbDmg(36 + P * 8), 0.78, 14, 0, size);
+    if (P >= 3) {
       const o = 20;
       const px = -Math.sin(ang) * o;
       const py = Math.cos(ang) * o;
@@ -2075,22 +2210,32 @@ export class HordeSim {
           this.xp -= this.need;
           this.lv += 1;
           this.need = xpNeed(this.lv - 1);
-          this.offer();
+          this.pendingShops += 1;
+          this.applyStats();
+          this.hp = Math.min(this.maxHp, this.hp + LEVEL_HP);
+          this.maybeGrantSixRed();
+          if (!this.picks) this.offer();
         }
       }
     }
   }
 
-  offer() {
-    const picks = rollPicks(this.charId, this.weps, this.time, this.lv, Math.random, this.lastPick);
+  offer(opts?: { resume?: boolean }) {
+    if (!opts?.resume) {
+      this.anvilChain = 0;
+      this.forgeChain = false;
+    }
+    const picks = rollPicks(this.charId, this.weps, this.time, this.lv, this.forgeRng, this.lastPick);
     if (picks.length === 0) {
       this.hp = Math.min(this.maxHp, this.hp + 24);
       this.line = "已经满了。多活一会儿。";
+      this.picks = null;
+      this.paused = this.userPaused;
       return;
     }
     this.picks = picks;
     this.paused = true;
-    this.line = "选一条路。";
+    this.line = this.forgeChain ? "连抽。再锻一次。" : "锻造器。伤已经不随等级涨。";
     sfxLevel();
   }
 

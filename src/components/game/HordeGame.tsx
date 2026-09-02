@@ -10,10 +10,15 @@ import { UPGRADE_MAP, type UpgradeId } from "@/lib/game/upgrades";
 import { cn } from "@/lib/utils";
 
 function wepChip(id: UpgradeId, lv: number) {
-  if (id === "limitless") return `无下限被动 ${lv}`;
-  if (id === "blue") return `苍主动 ${lv}`;
-  if (id === "cleave") return `捌被动 ${lv}`;
-  if (id === "slash") return `解主动 ${lv}`;
+  if (id === "limitless") return `无下限被动`;
+  if (id === "fist") return `拳脚`;
+  if (id === "blue") return `苍`;
+  if (id === "cleave") return `捌被动`;
+  if (id === "slash") return `解主动`;
+  if (id === "power") return `伤害砧 ${lv}`;
+  if (id === "rate") return `频率砧 ${lv}`;
+  if (id === "infCap") return `无下限容量 ${lv}`;
+  if (id === "infRad") return `无下限半径 ${lv}`;
   return `${UPGRADE_MAP[id]?.name ?? id} ${lv}`;
 }
 
@@ -262,6 +267,17 @@ export function HordeGame({
       },
       hurt: (kind: string, dmg: number) => sim.hurtPlayer(dmg, kind as DmgKind),
       birth: (kind: number, elite?: boolean) => sim.birth(kind as 0 | 1 | 2 | 3, { elite, near: true }),
+      place: (kind: number, dx = 8, dy = 0, elite?: boolean) => {
+        sim.birth(kind as 0 | 1 | 2 | 3, { elite, near: true });
+        const e = sim.enemies.filter((x) => x.alive).at(-1);
+        if (e) {
+          e.x = sim.x + dx;
+          e.y = sim.y + dy;
+        }
+      },
+      step: (n = 1) => {
+        for (let i = 0; i < n; i++) sim.tick(1 / 60);
+      },
       debug: () => ({
         lasers: sim.lasers.filter((l) => l.alive).length,
         chains: sim.chains.length,
@@ -273,7 +289,9 @@ export function HordeGame({
         lastHurt: sim.lastHurt,
         hp: sim.hp,
         blues: sim.bullets.filter((b) => b.alive && b.kind === 0).length,
+        reds: sim.bullets.filter((b) => b.alive && b.kind === 1).length,
         slashes: sim.bullets.filter((b) => b.alive && b.kind === 4).length,
+        punches: sim.punchHits,
       }),
     };
     return () => {
@@ -453,7 +471,7 @@ export function HordeGame({
             </p>
             <p className="truncate text-xs text-ice">{hud.line}</p>
             <p className="mt-0.5 text-[10px] text-mute">
-              {ice ? "无下限被动 · 左键苍" : "捌被动 · 左键解"}
+              {ice ? "无下限被动 · 左键拳脚" : "捌被动 · 左键解"}
             </p>
             {ice && (
               <div className="mt-1 flex items-center gap-2">
@@ -573,14 +591,19 @@ export function HordeGame({
       </div>
 
       <p className="pointer-events-none absolute bottom-3 left-1/2 z-10 hidden -translate-x-1/2 text-xs text-mute md:block">
-        右键走 · 按住左键{ice ? "苍" : "解"} · Q {ch.dashName} · W {ice ? "赫" : "捌"} · E {ice ? "虚式" : "开"} · R 术域 · Esc 暂停
+        右键走 · 按住左键{ice ? "拳脚" : "解"} · Q {ch.dashName} · W {ice ? "六赫" : "捌"} · E {ice ? "虚式" : "开"} · R 术域 · Esc 暂停
       </p>
 
       {hud.picks && (
         <div className="absolute inset-0 z-30 flex items-end justify-center bg-ink/70 p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:items-center">
           <div className="w-full max-w-lg">
-            <p className="mb-1 font-display text-xl text-paper">升级 · 选一条术式</p>
-            <p className="mb-3 text-xs text-mute">秽物会等。选完再割。新术开路，进化收束。</p>
+            <p className="mb-1 font-display text-xl text-paper">
+              {hud.forgeChain ? "锻造器 · 连抽" : "锻造器"}
+            </p>
+            <p className="mb-3 text-xs text-mute">
+              等级只加血。专属入砧有机会再锻。质变收口。
+              {hud.anvilChain > 0 ? ` 已连抽 ${hud.anvilChain}/3。` : ""}
+            </p>
             <div className="grid gap-2 sm:grid-cols-3">
               {hud.picks.map((p) => {
                 return (
@@ -599,7 +622,9 @@ export function HordeGame({
                     <p className="mt-1 text-xs tracking-[0.18em] text-ice">{p.kana}</p>
                     <p className="mt-2 text-xs leading-relaxed text-mute">{p.desc}</p>
                     <p className="mt-3 text-xs text-mute">
-                      {p.from <= 0 ? "解锁" : "进化"} · {p.from} → {p.to}
+                      {p.tag === "质变" ? "质变 · 选完收口" : p.tag === "专属" ? "专属 · 有机会连抽" : p.tag}
+                      {" · "}
+                      {p.from} → {p.to}
                     </p>
                   </button>
                 );
@@ -700,6 +725,8 @@ declare global {
       fire?: (on: boolean) => void;
       hurt?: (kind: string, dmg: number) => void;
       birth?: (kind: number, elite?: boolean) => void;
+      place?: (kind: number, dx?: number, dy?: number, elite?: boolean) => void;
+      step?: (n?: number) => void;
       debug: () => {
         lasers: number;
         chains: number;
@@ -711,7 +738,9 @@ declare global {
         lastHurt?: string | null;
         hp?: number;
         blues?: number;
+        reds?: number;
         slashes?: number;
+        punches?: number;
       };
     };
   }
