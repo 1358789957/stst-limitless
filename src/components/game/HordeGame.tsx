@@ -4,10 +4,85 @@ import { loadAtlas } from "@/lib/game/atlas";
 import { resumeAudio, setMuted, unlockAudio } from "@/lib/game/audio";
 import { CHAR_MAP, type CharId } from "@/lib/game/characters";
 import { formatClock } from "@/lib/game/format";
-import { HordeSim, type HudSnap } from "@/lib/game/horde";
+import { HordeSim, type DmgKind, type HudSnap } from "@/lib/game/horde";
 import { loadMeta, recordRun, setMutedMeta } from "@/lib/game/meta";
 import { UPGRADE_MAP, type UpgradeId } from "@/lib/game/upgrades";
 import { cn } from "@/lib/utils";
+
+function wepChip(id: UpgradeId, lv: number) {
+  if (id === "limitless") return `无下限被动 ${lv}`;
+  if (id === "blue") return `苍主动 ${lv}`;
+  if (id === "cleave") return `捌被动 ${lv}`;
+  if (id === "slash") return `解主动 ${lv}`;
+  return `${UPGRADE_MAP[id]?.name ?? id} ${lv}`;
+}
+
+function TwinStick({
+  side,
+  accent,
+  onVec,
+}: {
+  side: "left" | "right";
+  accent: "ice" | "blood";
+  onVec: (x: number, y: number) => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const pid = useRef<number | null>(null);
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const ring = accent === "blood" ? "border-blood/50" : "border-ice/50";
+  const apply = (cx: number, cy: number) => {
+    const el = box.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const dx = cx - (r.left + r.width / 2);
+    const dy = cy - (r.top + r.height / 2);
+    const m = Math.hypot(dx, dy) || 1;
+    const cap = r.width * 0.42;
+    const t = Math.min(1, m / cap);
+    const nx = (dx / m) * t;
+    const ny = (dy / m) * t;
+    setKnob({ x: nx, y: ny });
+    onVec(nx, ny);
+  };
+  return (
+    <div
+      ref={box}
+      className={cn(
+        "pointer-events-auto absolute bottom-[max(1.2rem,env(safe-area-inset-bottom))] z-20 size-28 rounded-full border-2 bg-ink/35 md:hidden",
+        ring,
+        side === "left" ? "left-4" : "right-4",
+      )}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        pid.current = e.pointerId;
+        (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+        unlockAudio();
+        apply(e.clientX, e.clientY);
+      }}
+      onPointerMove={(e) => {
+        if (pid.current !== e.pointerId) return;
+        apply(e.clientX, e.clientY);
+      }}
+      onPointerUp={(e) => {
+        if (pid.current !== e.pointerId) return;
+        pid.current = null;
+        setKnob({ x: 0, y: 0 });
+        onVec(0, 0);
+      }}
+      onPointerCancel={() => {
+        pid.current = null;
+        setKnob({ x: 0, y: 0 });
+        onVec(0, 0);
+      }}
+    >
+      <div
+        className="absolute left-1/2 top-1/2 size-11 -translate-x-1/2 -translate-y-1/2 rounded-full bg-paper/80"
+        style={{ transform: `translate(calc(-50% + ${knob.x * 36}px), calc(-50% + ${knob.y * 36}px))` }}
+      />
+    </div>
+  );
+}
 
 function SkillButton({
   slotKey,
@@ -73,10 +148,12 @@ export function HordeGame({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const simRef = useRef(new HordeSim(charId, { extraStart }));
   const movePtr = useRef<number | null>(null);
+  const firePtr = useRef<number | null>(null);
   const [hud, setHud] = useState<HudSnap>(() => simRef.current.hud());
   const [ready, setReady] = useState(false);
   const [muted, setMutedState] = useState(() => loadMeta().muted);
   const [unlocks, setUnlocks] = useState<string[]>([]);
+  const [touchUi, setTouchUi] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -93,6 +170,14 @@ export function HordeGame({
   useEffect(() => {
     setMuted(muted);
   }, [muted]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse)");
+    const sync = () => setTouchUi(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     const sim = simRef.current;
@@ -168,12 +253,27 @@ export function HordeGame({
       setMoveTarget: (x: number, y: number) => sim.setMoveTarget(x, y),
       grant: (id: string, n: number) => {
         sim.weps[id as UpgradeId] = n;
+        sim.applyStats();
         return sim.hud();
       },
+      setAimWorld: (x: number, y: number) => sim.setAimWorld(x, y),
+      fire: (on: boolean) => {
+        sim.wantFire = on;
+      },
+      hurt: (kind: string, dmg: number) => sim.hurtPlayer(dmg, kind as DmgKind),
+      birth: (kind: number, elite?: boolean) => sim.birth(kind as 0 | 1 | 2 | 3, { elite, near: true }),
       debug: () => ({
         lasers: sim.lasers.filter((l) => l.alive).length,
         chains: sim.chains.length,
         fields: sim.fields.filter((f) => f.alive).length,
+        flashHops: sim.chains.filter((c) => c.kind === 0).length,
+        bf: { window: sim.bfWindow, buff: sim.bfBuff, hits: sim.bfHits },
+        shell: { r: sim.shellRadius(), load: sim.shellLoad, cap: sim.shellCap, leak: sim.shellLeak, press: sim.shellPress },
+        adapt: { fill: sim.adaptFill, on: sim.adaptOn, turns: sim.adaptTurns, focus: sim.adaptFocus },
+        lastHurt: sim.lastHurt,
+        hp: sim.hp,
+        blues: sim.bullets.filter((b) => b.alive && b.kind === 0).length,
+        slashes: sim.bullets.filter((b) => b.alive && b.kind === 4).length,
       }),
     };
     return () => {
@@ -263,11 +363,24 @@ export function HordeGame({
     setHud(simRef.current.hud());
   }
 
-  function aimAt(clientX: number, clientY: number) {
+  function worldFromClient(clientX: number, clientY: number) {
     const cvs = canvasRef.current;
-    if (!cvs) return;
+    if (!cvs) return null;
     const rect = cvs.getBoundingClientRect();
-    simRef.current.setMoveFromScreen(clientX - rect.left, clientY - rect.top, rect.width, rect.height);
+    return { sx: clientX - rect.left, sy: clientY - rect.top, w: rect.width, h: rect.height };
+  }
+
+  function moveAt(clientX: number, clientY: number) {
+    const p = worldFromClient(clientX, clientY);
+    if (!p) return;
+    simRef.current.setMoveFromScreen(p.sx, p.sy, p.w, p.h);
+  }
+
+  function fireAt(clientX: number, clientY: number) {
+    const p = worldFromClient(clientX, clientY);
+    if (!p) return;
+    simRef.current.setAimFromScreen(p.sx, p.sy, p.w, p.h);
+    simRef.current.wantFire = true;
   }
 
   const ch = CHAR_MAP[hud.charId];
@@ -281,25 +394,36 @@ export function HordeGame({
         className="absolute inset-0 h-full w-full touch-none"
         onContextMenu={(e) => e.preventDefault()}
         onPointerDown={(e) => {
-          if (blocking) return;
+          if (blocking || touchUi) return;
+          const fire = e.pointerType === "mouse" && e.button === 0;
           const move = e.pointerType !== "mouse" || e.button === 2;
-          if (!move) return;
+          if (!fire && !move) return;
           e.preventDefault();
           unlockAudio();
-          movePtr.current = e.pointerId;
           (e.currentTarget as HTMLCanvasElement).setPointerCapture(e.pointerId);
-          aimAt(e.clientX, e.clientY);
+          if (fire) {
+            firePtr.current = e.pointerId;
+            fireAt(e.clientX, e.clientY);
+          } else {
+            movePtr.current = e.pointerId;
+            moveAt(e.clientX, e.clientY);
+          }
         }}
         onPointerMove={(e) => {
-          if (movePtr.current !== e.pointerId) return;
-          aimAt(e.clientX, e.clientY);
+          if (firePtr.current === e.pointerId) fireAt(e.clientX, e.clientY);
+          if (movePtr.current === e.pointerId) moveAt(e.clientX, e.clientY);
         }}
         onPointerUp={(e) => {
-          if (movePtr.current !== e.pointerId) return;
-          movePtr.current = null;
+          if (firePtr.current === e.pointerId) {
+            firePtr.current = null;
+            simRef.current.wantFire = false;
+          }
+          if (movePtr.current === e.pointerId) movePtr.current = null;
         }}
         onPointerCancel={() => {
+          firePtr.current = null;
           movePtr.current = null;
+          simRef.current.wantFire = false;
         }}
       />
 
@@ -328,6 +452,38 @@ export function HordeGame({
               祓除 {hud.kills} · 第 {hud.wave} 波 · Lv. {hud.level}
             </p>
             <p className="truncate text-xs text-ice">{hud.line}</p>
+            <p className="mt-0.5 text-[10px] text-mute">
+              {ice ? "无下限被动 · 左键苍" : "捌被动 · 左键解"}
+            </p>
+            {ice && (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-[10px] text-mute">无下限</span>
+                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-ink-3">
+                  <div
+                    className={cn("h-full rounded-full", hud.shellLeak ? "bg-blood" : "bg-ice")}
+                    style={{ width: `${Math.max(0, Math.min(100, hud.shell * 100))}%` }}
+                  />
+                </div>
+                {hud.shellLeak && <span className="text-[10px] text-blood">漏</span>}
+              </div>
+            )}
+            {hud.adapt && (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-[10px] text-mute">轮</span>
+                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-ink-3">
+                  <div
+                    className="h-full rounded-full bg-blood"
+                    style={{ width: `${Math.max(0, Math.min(100, (hud.adapt.fill / Math.max(1, hud.adapt.need)) * 100))}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-mute">
+                  {hud.adapt.on ?? hud.adapt.focus ?? "—"} · {hud.adapt.turns}
+                </span>
+              </div>
+            )}
+            {(hud.bfWindow > 0 || hud.bfBuff > 0) && (
+              <p className="text-[10px] text-paper">{hud.bfBuff > 0 ? "黑闪" : "对上了"}</p>
+            )}
           </div>
           <div className="pointer-events-none flex min-w-[4.6rem] flex-col items-center pt-0.5">
             <p className="font-display text-2xl tabular-nums leading-none text-paper">
@@ -376,14 +532,21 @@ export function HordeGame({
           <div className="mt-2 flex flex-wrap gap-1.5">
             {hud.weps.map((w) => (
               <span key={w.id} className="rounded-sm bg-ink-2/90 px-2 py-0.5 text-[11px] text-mute">
-                {UPGRADE_MAP[w.id]?.name ?? w.id} {w.lv}
+                {wepChip(w.id, w.lv)}
               </span>
             ))}
           </div>
         )}
       </header>
 
-      <div className="absolute bottom-[max(1.4rem,env(safe-area-inset-bottom))] right-4 z-10 flex flex-col items-end gap-2">
+      {touchUi && (
+        <>
+          <TwinStick side="left" accent={ice ? "ice" : "blood"} onVec={(x, y) => simRef.current.setMoveStick(x, y)} />
+          <TwinStick side="right" accent={ice ? "ice" : "blood"} onVec={(x, y) => simRef.current.setFireStick(x, y)} />
+        </>
+      )}
+
+      <div className={cn("absolute right-4 z-10 flex flex-col items-end gap-2", touchUi ? "bottom-[max(10.5rem,calc(env(safe-area-inset-bottom)+9rem))]" : "bottom-[max(1.4rem,env(safe-area-inset-bottom))]")}>
         {hud.skills
           .slice()
           .reverse()
@@ -410,7 +573,7 @@ export function HordeGame({
       </div>
 
       <p className="pointer-events-none absolute bottom-3 left-1/2 z-10 hidden -translate-x-1/2 text-xs text-mute md:block">
-        右键点地走 · Q {ch.dashName} · W {ice ? "赫" : "捌"} · E {ice ? "虚式" : "开"} · R 术域 · Esc 暂停
+        右键走 · 按住左键{ice ? "苍" : "解"} · Q {ch.dashName} · W {ice ? "赫" : "捌"} · E {ice ? "虚式" : "开"} · R 术域 · Esc 暂停
       </p>
 
       {hud.picks && (
@@ -451,7 +614,7 @@ export function HordeGame({
           <div className="w-full max-w-sm rounded-xl border border-line bg-ink-2 p-6">
             <p className="font-display text-2xl text-paper">暂停</p>
             <p className="mt-2 text-sm text-mute">秽物不会等你。但这一秒可以。</p>
-            <p className="mt-1 text-xs text-mute">右键点地。QWER 术式。</p>
+            <p className="mt-1 text-xs text-mute">右键走。按住左键打。QWER 术式。</p>
             <div className="mt-5 flex flex-col gap-2">
               <button
                 type="button"
@@ -533,7 +696,23 @@ declare global {
       hud: () => HudSnap;
       setMoveTarget: (x: number, y: number) => void;
       grant: (id: string, n: number) => HudSnap;
-      debug: () => { lasers: number; chains: number; fields: number };
+      setAimWorld?: (x: number, y: number) => void;
+      fire?: (on: boolean) => void;
+      hurt?: (kind: string, dmg: number) => void;
+      birth?: (kind: number, elite?: boolean) => void;
+      debug: () => {
+        lasers: number;
+        chains: number;
+        fields: number;
+        flashHops?: number;
+        bf?: { window: number; buff: number; hits: number };
+        shell?: { r: number; load: number; cap: number; leak: boolean; press: number };
+        adapt?: { fill: number; on: string | null; turns: number; focus: string | null };
+        lastHurt?: string | null;
+        hp?: number;
+        blues?: number;
+        slashes?: number;
+      };
     };
   }
 }

@@ -111,6 +111,17 @@ describe("upgrade picks", () => {
     assert.ok(later.some((p) => p.id === "ripple" || p.id === "ray" || p.tag === "新术"));
   });
 
+  it("keeps 魔虚罗 on Sukuna only", () => {
+    const weps = emptyWeps();
+    weps.slash = 1;
+    weps.cleave = 1;
+    const picks = rollPicks("sukuna", weps, 40, 3, () => 0.5);
+    const gojo = rollPicks("gojo", emptyWeps(), 40, 3, () => 0.5);
+    assert.ok(UPGRADES.some((u) => u.id === "adapt" && u.who.includes("sukuna")));
+    assert.ok(!gojo.some((p) => p.id === "adapt"));
+    assert.ok(picks.length <= 3);
+  });
+
   it("returns an empty pool when everything is maxed", () => {
     const weps = emptyWeps();
     for (const id of Object.keys(weps) as (keyof typeof weps)[]) weps[id] = 99;

@@ -18,8 +18,18 @@ export const CLEAR_TIME = 180;
 export const DASH_COOLDOWN = 2.15;
 export const ARRIVE = 12;
 export const EXTRA_START: Record<CharId, UpgradeId> = {
+  gojo: "red",
+  sukuna: "blades",
+};
+
+export const ACTIVE_START: Record<CharId, UpgradeId> = {
   gojo: "blue",
-  sukuna: "cleave",
+  sukuna: "slash",
+};
+
+export const STARTERS: Record<CharId, UpgradeId[]> = {
+  gojo: ["limitless", "blue"],
+  sukuna: ["slash", "cleave"],
 };
 
 const MAX_E = 200;
@@ -28,6 +38,17 @@ const MAX_G = 180;
 const MAX_FX = 240;
 const MAX_LASER = 8;
 const MAX_FIELD = 18;
+const MAX_HAZ = 24;
+
+export type DmgKind = "contact" | "projectile" | "laser" | "explosion";
+export type HitTag = "none" | "rim" | "slash" | "cleave" | "dash";
+
+export const DMG_KIND_NAME: Record<DmgKind, string> = {
+  contact: "接触",
+  projectile: "弹道",
+  laser: "激光",
+  explosion: "爆炸",
+};
 
 type Kind = 0 | 1 | 2 | 3;
 
@@ -48,6 +69,7 @@ type Enemy = {
   seed: number;
   elite: boolean;
   mark: number;
+  atk: number;
 };
 
 type Bullet = {
@@ -96,6 +118,21 @@ type Field = {
   dmg: number;
   acc: number;
   hue: 0 | 1;
+};
+
+type Hazard = {
+  alive: boolean;
+  style: 0 | 1;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  r: number;
+  dmg: number;
+  life: number;
+  ang: number;
+  len: number;
+  kind: DmgKind;
 };
 
 type Gem = { alive: boolean; x: number; y: number; v: number };
@@ -148,7 +185,7 @@ function redCdFor(r: number) {
 }
 
 function cleaveCdFor(c: number) {
-  return [0, 1.2, 1.05, 0.95, 0.85][Math.min(4, Math.max(0, c))] ?? 1.2;
+  return [0, 0.72, 0.62, 0.54, 0.46][Math.min(4, Math.max(0, c))] ?? 0.72;
 }
 
 function flameCdFor(f: number) {
@@ -161,6 +198,14 @@ function rayCdFor(lv: number) {
 
 function beamCdFor(lv: number) {
   return [0, 1.7, 1.5, 1.35, 1.2][Math.min(4, Math.max(0, lv))] ?? 1.7;
+}
+
+function blueCdFor(lv: number) {
+  return [0, 0.48, 0.42, 0.36, 0.3][Math.min(4, Math.max(0, lv))] ?? 0.48;
+}
+
+function slashCdFor(lv: number) {
+  return [0, 0.4, 0.36, 0.32, 0.28][Math.min(4, Math.max(0, lv))] ?? 0.4;
 }
 
 function clamp(v: number, a: number, b: number) {
@@ -207,6 +252,23 @@ export type HudSnap = {
   line: string;
   charId: CharId;
   skills: SkillSlot[];
+  shell: number;
+  shellLeak: boolean;
+  bfWindow: number;
+  bfBuff: number;
+  activeName: string;
+  activeCd: number;
+  activeMax: number;
+  activeReady: boolean;
+  adapt: {
+    rank: number;
+    fill: number;
+    need: number;
+    focus: DmgKind | null;
+    on: DmgKind | null;
+    held: DmgKind | null;
+    turns: number;
+  } | null;
 };
 
 export type SkillSlot = {
@@ -236,9 +298,17 @@ export class HordeSim {
   wantSecondary = false;
   wantBurst = false;
   wantPurple = false;
+  wantFire = false;
   hasMove = false;
+  hasAim = false;
   tx = 0;
   ty = 0;
+  aimX = 0;
+  aimY = 0;
+  moveStickX = 0;
+  moveStickY = 0;
+  fireStickX = 0;
+  fireStickY = 0;
   charId: CharId = "gojo";
 
   x = WORLD / 2;
@@ -300,6 +370,30 @@ export class HordeSim {
   fields: Field[] = [];
   li = 0;
   fi2 = 0;
+  hazards: Hazard[] = [];
+  hi = 0;
+  bfWindow = 0;
+  bfBuff = 0;
+  bfCd = 0;
+  bfHits = 0;
+  bfPunch = 0;
+  bfArmedSecond = false;
+  bfCharges = 0;
+  slashQuiet = 0;
+  slashArmed = false;
+  overload = 0;
+  shellLeak = false;
+  shellPress = 0;
+  shellLoad = 0;
+  shellCap = 5.2;
+  fieldAcc = 0;
+  adaptFill = 0;
+  adaptFocus: DmgKind | null = null;
+  adaptOn: DmgKind | null = null;
+  adaptHeld: DmgKind | null = null;
+  adaptTurns = 0;
+  adaptPulse = 0;
+  lastHurt: DmgKind | null = null;
 
   enemies: Enemy[] = [];
   bullets: Bullet[] = [];
@@ -350,7 +444,9 @@ export class HordeSim {
     this.line = ch.line;
     this.weps = emptyWeps();
     this.weps[ch.start as UpgradeId] = 1;
-    if (this.extraStart) this.weps[EXTRA_START[this.charId]] = 1;
+    if (this.charId === "gojo") this.weps.blue = Math.max(1, this.weps.blue);
+    else this.weps.cleave = Math.max(1, this.weps.cleave);
+    if (this.extraStart) this.weps[EXTRA_START[this.charId]] = Math.max(1, this.weps[EXTRA_START[this.charId]]);
     this.cd = {};
     this.domainCd = 0;
     this.dashCd = 0;
@@ -370,16 +466,48 @@ export class HordeSim {
     this.chains = [];
     this.lasers = Array.from({ length: MAX_LASER }, () => this.emptyLaser());
     this.fields = Array.from({ length: MAX_FIELD }, () => this.emptyField());
+    this.hazards = Array.from({ length: MAX_HAZ }, () => this.emptyHaz());
     this.li = 0;
     this.fi2 = 0;
+    this.hi = 0;
+    this.bfWindow = 0;
+    this.bfBuff = 0;
+    this.bfCd = 0;
+    this.bfHits = 0;
+    this.bfPunch = 0;
+    this.bfArmedSecond = false;
+    this.bfCharges = 0;
+    this.slashQuiet = 0;
+    this.slashArmed = false;
+    this.overload = 0;
+    this.shellLeak = false;
+    this.shellPress = 0;
+    this.shellLoad = 0;
+    this.shellCap = 5.2;
+    this.fieldAcc = 0;
+    this.adaptFill = 0;
+    this.adaptFocus = null;
+    this.adaptOn = null;
+    this.adaptHeld = null;
+    this.adaptTurns = 0;
+    this.adaptPulse = 0;
+    this.lastHurt = null;
     this.wantDomain = false;
     this.wantDash = false;
     this.wantSecondary = false;
     this.wantBurst = false;
     this.wantPurple = false;
+    this.wantFire = false;
     this.hasMove = false;
+    this.hasAim = false;
     this.tx = this.x;
     this.ty = this.y;
+    this.aimX = this.x;
+    this.aimY = this.y;
+    this.moveStickX = 0;
+    this.moveStickY = 0;
+    this.fireStickX = 0;
+    this.fireStickY = 0;
     this.enemies = Array.from({ length: MAX_E }, () => this.emptyE());
     this.bullets = Array.from({ length: MAX_B }, () => this.emptyB());
     this.gems = Array.from({ length: MAX_G }, () => ({ alive: false, x: 0, y: 0, v: 1 }));
@@ -388,6 +516,7 @@ export class HordeSim {
     this.bi = 0;
     this.gi = 0;
     this.fi = 0;
+    this.applyStats();
   }
 
   emptyE(): Enemy {
@@ -408,6 +537,7 @@ export class HordeSim {
       seed: Math.random(),
       elite: false,
       mark: 0,
+      atk: 0.8,
     };
   }
   emptyB(): Bullet {
@@ -459,6 +589,23 @@ export class HordeSim {
     return { alive: false, x: 0, y: 0, r: 40, life: 0, dmg: 6, acc: 0, hue: 0 };
   }
 
+  emptyHaz(): Hazard {
+    return {
+      alive: false,
+      style: 0,
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+      r: 6,
+      dmg: 8,
+      life: 0,
+      ang: 0,
+      len: 0,
+      kind: "projectile",
+    };
+  }
+
   setKeys(codes: string[]) {
     this.injected = new Set(codes);
   }
@@ -507,6 +654,27 @@ export class HordeSim {
       line: this.line,
       charId: this.charId,
       skills: this.skillSlots(),
+      shell: this.shellCap > 0 ? this.shellLoad / this.shellCap : 0,
+      shellLeak: this.shellLeak,
+      bfWindow: this.bfWindow,
+      bfBuff: this.bfBuff,
+      activeName: this.charId === "gojo" ? "苍" : "解",
+      activeCd: this.charId === "gojo" ? (this.cd.blue ?? 0) : (this.cd.slash ?? 0),
+      activeMax: this.charId === "gojo" ? blueCdFor(this.weps.blue) : slashCdFor(this.weps.slash),
+      activeReady:
+        this.charId === "gojo" ? this.weps.blue > 0 && (this.cd.blue ?? 0) <= 0 : this.weps.slash > 0 && (this.cd.slash ?? 0) <= 0,
+      adapt:
+        this.charId === "sukuna" && this.weps.adapt > 0
+          ? {
+              rank: this.weps.adapt,
+              fill: this.adaptFill,
+              need: this.adaptNeed(),
+              focus: this.adaptFocus,
+              on: this.adaptOn,
+              held: this.adaptHeld,
+              turns: this.adaptTurns,
+            }
+          : null,
     };
   }
 
@@ -533,7 +701,7 @@ export class HordeSim {
       },
       {
         key: "W",
-        name: UPGRADE_MAP[wId].name,
+        name: gojo ? UPGRADE_MAP[wId].name : "捌",
         unlocked: wLv > 0,
         ready: wLv > 0 && wCd <= 0,
         cd: wCd,
@@ -570,6 +738,7 @@ export class HordeSim {
     this.wantBurst = false;
     this.wantPurple = false;
     this.wantDomain = false;
+    this.wantFire = false;
   }
 
   choose(id: UpgradeId) {
@@ -593,12 +762,266 @@ export class HordeSim {
     const r = this.weps.rct;
     const s = this.weps.speed;
     this.pickup = 52 + eyes * 34;
-    this.crit = Math.min(0.5, 0.07 + f * 0.06);
-    this.critDmg = 2.2 + f * 0.35;
+    this.crit = Math.min(0.22, 0.06 + f * 0.03);
+    this.critDmg = 2.1 + f * 0.12;
     this.regen = r * 2.2;
     this.maxHp = 100 + r * 18;
     this.hp = Math.min(this.maxHp, this.hp);
     this.speed = 200 * (1 + s * 0.2);
+    this.shellCap = this.shellCapacity();
+  }
+
+  adaptNeed() {
+    const a = this.weps.adapt;
+    return a >= 3 ? 3 : a >= 2 ? 3.4 : 4.2;
+  }
+
+  flashGap() {
+    return Math.max(0.22, 0.64 - this.weps.flash * 0.12);
+  }
+
+  flashWindow() {
+    return 0.18 + this.weps.flash * 0.14;
+  }
+
+  flashBuff() {
+    return 0.9 + this.weps.flash * 0.4;
+  }
+
+  bfMult() {
+    return 1.65 + this.weps.flash * 0.42;
+  }
+
+  shellRadius() {
+    const L = this.weps.limitless;
+    if (this.charId !== "gojo" || L < 1) return 0;
+    return 56 + (L - 1) * 16;
+  }
+
+  shellCapacity() {
+    const L = this.weps.limitless;
+    return [0, 5.2, 8.6, 13.4, 20][Math.min(4, Math.max(0, L))] ?? 5.2;
+  }
+
+  shellRegen() {
+    const L = this.weps.limitless;
+    return [0, 5.8, 8.4, 12.2, 18][Math.min(4, Math.max(0, L))] ?? 5.8;
+  }
+
+  fieldDps() {
+    const L = this.weps.limitless;
+    const late = this.time > 100 ? 3.2 : this.time > 60 ? 1.2 : 0;
+    return 4.2 + L * 1.4 + late;
+  }
+
+  enemyMass(e: Enemy) {
+    if (e.kind === 3) return 5;
+    if (e.kind === 2) return e.elite ? 5 : 3.4;
+    if (e.elite) return 4;
+    if (e.kind === 1) return 1.35;
+    return 1;
+  }
+
+  sureHit(e: Enemy) {
+    return e.elite || e.kind === 2 || e.kind === 3;
+  }
+
+  fodder(e: Enemy) {
+    return !this.sureHit(e);
+  }
+
+  cleaveCut(e: Enemy) {
+    const r = this.weps.cleave;
+    const pct = [0, 0.44, 0.52, 0.6, 0.68][Math.min(4, Math.max(0, r))] ?? 0.44;
+    let harden = 1;
+    if (e.kind === 1) harden = 0.74;
+    if (e.kind === 2) harden = 0.58;
+    if (e.kind === 3) harden = 0.15;
+    if (e.elite && e.kind !== 3) harden *= 0.5;
+    const raw = e.max * pct * harden;
+    const floor = 3.5 + r;
+    const cap = e.kind === 3 ? e.max * (0.06 + r * 0.012) : e.max * 0.82;
+    return clamp(raw, floor, cap);
+  }
+
+  adaptFactor(kind: DmgKind) {
+    const r = this.weps.adapt;
+    if (r < 1) return 1;
+    if (this.adaptOn === kind) return [1, 0.45, 0.32, 0.22][Math.min(3, r)] ?? 0.45;
+    if (r >= 3 && this.adaptHeld === kind) return 0.55;
+    return 1;
+  }
+
+  adaptHitBonus(e: Enemy) {
+    const r = this.weps.adapt;
+    if (r < 1) return 1;
+    const kinds: DmgKind[] = [];
+    if (this.adaptOn) kinds.push(this.adaptOn);
+    if (r >= 3 && this.adaptHeld) kinds.push(this.adaptHeld);
+    let m = 1;
+    const add = 0.28 + r * 0.12;
+    for (const k of kinds) {
+      if (k === "contact" && (e.kind === 0 || e.kind === 1)) m += add;
+      if (k === "projectile" && e.kind === 2) m += add;
+      if ((k === "laser" || k === "explosion") && e.kind === 3) m += add;
+    }
+    return m;
+  }
+
+  feedAdapt(kind: DmgKind) {
+    if (this.weps.adapt < 1) return;
+    if (this.adaptOn === kind) return;
+    if (this.adaptFocus && this.adaptFocus !== kind) {
+      this.adaptFill *= this.weps.adapt >= 2 ? 0.35 : 0.08;
+      this.adaptFocus = kind;
+      this.line = "轮转。换一种。";
+    } else {
+      this.adaptFocus = kind;
+    }
+    this.adaptFill += 1;
+    if (this.adaptFill >= this.adaptNeed()) this.turnWheel(kind);
+  }
+
+  turnWheel(kind: DmgKind) {
+    if (this.weps.adapt >= 3 && this.adaptOn && this.adaptOn !== kind) this.adaptHeld = this.adaptOn;
+    this.adaptOn = kind;
+    this.adaptFill = 0;
+    this.adaptFocus = null;
+    this.adaptPulse = 1.1;
+    this.adaptTurns += 1;
+    this.shake = Math.max(this.shake, 7);
+    this.line = `适应。${DMG_KIND_NAME[kind]}。`;
+    this.pushFx(this.x, this.y, 52, 0.4, 20, "轮", true);
+  }
+
+  openBfWindow() {
+    if (this.weps.flash < 1) return;
+    this.bfWindow = Math.max(this.bfWindow, this.flashWindow());
+  }
+
+  tryBlackFlash(e: Enemy, tag: HitTag) {
+    if (this.weps.flash < 1) return false;
+    if (this.bfCd > 0 && this.bfCharges <= 0) return false;
+    let open = this.bfWindow > 0;
+    if (tag === "rim" || tag === "dash") open = true;
+    if ((tag === "slash" || tag === "cleave") && this.slashArmed) open = true;
+    if (!open) {
+      if (tag === "slash" || tag === "cleave") {
+        this.slashQuiet = 0;
+        this.slashArmed = false;
+      }
+      return false;
+    }
+    this.triggerBlackFlash(e);
+    if (tag === "slash" || tag === "cleave") {
+      this.slashQuiet = 0;
+      this.slashArmed = false;
+    }
+    return true;
+  }
+
+  triggerBlackFlash(e: Enemy) {
+    const extra = this.bfCharges > 0;
+    this.bfCharges = 0;
+    this.bfWindow = 0;
+    this.bfBuff = this.flashBuff();
+    this.bfCd = Math.max(1.35, 2.55 - this.weps.flash * 0.4);
+    if (this.weps.flash >= 3 && !extra) this.bfArmedSecond = true;
+    this.bfHits += 1;
+    this.bfPunch = 1;
+    this.shake = Math.max(this.shake, 18);
+    this.hitstop = Math.max(this.hitstop, 0.14);
+    this.pushFx(e.x, e.y, 50, 0.42, 5, "黑闪", true);
+    this.pushFx(this.x, this.y, 90, 0.18, 19, "", true);
+    this.line = "对上了。";
+    sfxCrit();
+  }
+
+  aimAng() {
+    const stick = Math.hypot(this.fireStickX, this.fireStickY);
+    if (stick > 0.22) return Math.atan2(this.fireStickY, this.fireStickX);
+    if (this.hasAim) return Math.atan2(this.aimY - this.y, this.aimX - this.x);
+    return this.facing;
+  }
+
+  setAimWorld(x: number, y: number) {
+    this.hasAim = true;
+    this.aimX = x;
+    this.aimY = y;
+  }
+
+  setAimFromScreen(sx: number, sy: number, w: number, h: number) {
+    this.setAimWorld(this.camx - w / 2 + sx, this.camy - h / 2 + sy);
+  }
+
+  setMoveStick(x: number, y: number) {
+    this.moveStickX = x;
+    this.moveStickY = y;
+  }
+
+  setFireStick(x: number, y: number) {
+    this.fireStickX = x;
+    this.fireStickY = y;
+    if (Math.hypot(x, y) > 0.25) {
+      this.wantFire = true;
+      this.hasAim = true;
+      this.aimX = this.x + x * 420;
+      this.aimY = this.y + y * 420;
+    } else {
+      this.wantFire = false;
+    }
+  }
+
+  castActive() {
+    const ang = this.aimAng();
+    this.facing = ang;
+    this.yaw = Math.atan2(-Math.cos(ang), -Math.sin(ang));
+    if (this.charId === "gojo") this.fireBlue(ang);
+    else this.fireSlash(ang);
+  }
+
+  fireBlue(ang: number) {
+    const B = this.weps.blue;
+    if (B < 1) return;
+    if (!this.readyCd("blue", blueCdFor(B))) return;
+    const n = B >= 4 ? 3 : B >= 2 ? 2 : 1;
+    const size = 8 + B * 3.2;
+    const pierce = B >= 3 ? 1 : 0;
+    for (let i = 0; i < n; i++) {
+      const a = ang + (i - (n - 1) / 2) * 0.2;
+      this.shot(0, this.x, this.y, Math.cos(a) * 280, Math.sin(a) * 280, 10 + B * 4, 2.4, pierce, 0.4, size);
+    }
+    sfxSkill("blue");
+  }
+
+  fireSlash(ang: number) {
+    const S = this.weps.slash;
+    if (S < 1) return;
+    if (!this.readyCd("slash", slashCdFor(S))) return;
+    const n = S >= 4 ? 2 : S >= 2 ? 2 : 1;
+    const size = 12 + S * 3.4;
+    const pierce = S >= 3 ? 2 : 0;
+    for (let i = 0; i < n; i++) {
+      const a = ang + (i - (n - 1) / 2) * 0.22;
+      this.shot(4, this.x, this.y, Math.cos(a) * 520, Math.sin(a) * 520, 12 + S * 3.6, 0.44 + S * 0.03, pierce, 0, size);
+    }
+    if (S >= 4) {
+      const cross = ang + Math.PI / 2;
+      this.shot(4, this.x, this.y, Math.cos(cross) * 500, Math.sin(cross) * 500, 12 + S * 3, 0.4, 1, 0, size);
+      this.shot(4, this.x, this.y, Math.cos(cross + Math.PI) * 500, Math.sin(cross + Math.PI) * 500, 12 + S * 3, 0.4, 1, 0, size);
+    }
+  }
+
+  hurtPlayer(raw: number, kind: DmgKind) {
+    if (this.over) return;
+    const dmg = raw * this.adaptFactor(kind);
+    this.feedAdapt(kind);
+    this.lastHurt = kind;
+    this.hp -= dmg;
+    this.invuln = kind === "contact" ? 0.7 : 0.42;
+    this.shake = Math.max(this.shake, kind === "contact" ? 8 : 6);
+    sfxHurt();
+    this.line = CHAR_MAP[this.charId].hitLine;
   }
 
   finish(won: boolean) {
@@ -622,6 +1045,7 @@ export class HordeSim {
       this.wantBurst = false;
       this.wantPurple = false;
       this.wantDomain = false;
+      this.wantFire = false;
       return;
     }
     if (this.hitstop > 0) {
@@ -637,6 +1061,19 @@ export class HordeSim {
     this.domainCd = Math.max(0, this.domainCd - step);
     this.dashCd = Math.max(0, this.dashCd - step);
     this.purpleCd = Math.max(0, this.purpleCd - step);
+    this.bfWindow = Math.max(0, this.bfWindow - step);
+    const hadBuff = this.bfBuff > 0;
+    this.bfBuff = Math.max(0, this.bfBuff - step);
+    if (hadBuff && this.bfBuff <= 0 && this.bfArmedSecond) {
+      this.bfArmedSecond = false;
+      this.bfCharges = 1;
+      this.bfCd = 0.12;
+    }
+    this.bfCd = Math.max(0, this.bfCd - step);
+    this.bfPunch = Math.max(0, this.bfPunch - step * 4.2);
+    this.adaptPulse = Math.max(0, this.adaptPulse - step);
+    this.slashQuiet += step;
+    if (this.weps.flash > 0 && this.slashQuiet >= this.flashGap()) this.slashArmed = true;
     for (const k of Object.keys(this.cd)) {
       this.cd[k] = Math.max(0, (this.cd[k] ?? 0) - step);
     }
@@ -660,6 +1097,7 @@ export class HordeSim {
     this.wantPurple = false;
     if (this.wantDomain) this.castDomain();
     this.wantDomain = false;
+    if (this.wantFire || Math.hypot(this.fireStickX, this.fireStickY) > 0.25) this.castActive();
 
     if (this.dashT > 0) {
       this.stepDash(step);
@@ -679,6 +1117,10 @@ export class HordeSim {
       this.x = clamp(this.x + this.vx * step, 40, WORLD - 40);
       this.y = clamp(this.y + this.vy * step, 40, WORLD - 40);
     }
+    if (this.wantFire || Math.hypot(this.fireStickX, this.fireStickY) > 0.25) {
+      this.facing = this.aimAng();
+      this.yaw = Math.atan2(-Math.cos(this.facing), -Math.sin(this.facing));
+    }
     if (this.getSpeed() > 40) {
       this.trail.unshift({ x: this.x, y: this.y, flip: Math.cos(this.facing) < 0 });
       const cap = 3 + this.weps.speed * 2;
@@ -696,6 +1138,8 @@ export class HordeSim {
     this.stepChains(step);
     this.stepLasers(step);
     this.stepFields(step);
+    this.stepHazards(step);
+    this.stepShell(step);
     this.gemsStep(step);
     this.fxStep(step);
     this.contact();
@@ -731,6 +1175,14 @@ export class HordeSim {
     if (src.has("KeyW")) this.wantSecondary = true;
     if (src.has("KeyE")) this.wantBurst = true;
     if (src.has("KeyR")) this.wantDomain = true;
+
+    const stick = Math.hypot(this.moveStickX, this.moveStickY);
+    if (stick > 0.18) {
+      this.hasMove = false;
+      this.ax = this.moveStickX;
+      this.ay = this.moveStickY;
+      return;
+    }
 
     let ax = 0;
     let ay = 0;
@@ -804,9 +1256,8 @@ export class HordeSim {
     const Cl = this.weps.cleave;
     if (Cl < 1) return;
     if (!this.readyCd("cleave", cleaveCdFor(Cl))) return;
-    const rad = [0, 68, 86, 102, 118][Math.min(4, Cl)] ?? 68;
-    const arc = [0, 0.75, 1.05, 1.4, Math.PI][Math.min(4, Cl)] ?? 0.75;
-    this.cleave(rad, arc, 16 + Cl * 5);
+    const rad = [0, 54, 70, 88, 108][Math.min(4, Cl)] ?? 54;
+    this.cleave(rad, Math.PI, 0);
   }
 
   volleyFlame() {
@@ -923,21 +1374,39 @@ export class HordeSim {
     e.seed = Math.random();
     e.elite = elite;
     e.mark = 0;
+    e.atk = kind === 3 ? 1.35 : kind === 2 ? 0.85 + Math.random() * 0.4 : 2;
   }
 
   moveEnemies(dt: number) {
     const slow = this.freeze > 0 ? 0.08 : 1;
+    const R = this.shellRadius();
     for (const e of this.enemies) {
       if (!e.alive) continue;
       e.hurt = Math.max(0, e.hurt - dt);
       e.mark = Math.max(0, e.mark - dt);
+      e.atk = Math.max(0, e.atk - dt);
       const dx = this.x - e.x;
       const dy = this.y - e.y;
       const d = Math.hypot(dx, dy) || 1;
-      e.vx = (dx / d) * e.spd * slow;
-      e.vy = (dy / d) * e.spd * slow;
+      let spd = e.spd * slow;
+      const inField = R > 0 && d < R + e.r + 10;
+      const blocked = inField && this.fodder(e) && !this.shellLeak;
+      if (blocked) spd *= 0.22;
+      else if (inField && this.sureHit(e) && !this.shellLeak) spd *= 0.88;
+      e.vx = (dx / d) * spd;
+      e.vy = (dy / d) * spd;
       e.x += e.vx * dt;
       e.y += e.vy * dt;
+      if (blocked) {
+        const nd = Math.hypot(e.x - this.x, e.y - this.y) || 1;
+        if (nd < R - 2) {
+          const nx = (e.x - this.x) / nd;
+          const ny = (e.y - this.y) / nd;
+          e.x = this.x + nx * (R - 1);
+          e.y = this.y + ny * (R - 1);
+        }
+      }
+      if (e.atk <= 0) this.enemyAttack(e);
     }
   }
 
@@ -955,33 +1424,19 @@ export class HordeSim {
     return best;
   }
 
-  fire(dt: number) {
+  fire(_dt: number) {
     const aim = this.nearest(this.x, this.y);
-    if (aim && Math.hypot(this.vx, this.vy) < 8) {
+    if (!this.wantFire && Math.hypot(this.fireStickX, this.fireStickY) < 0.25 && aim && Math.hypot(this.vx, this.vy) < 8) {
       this.facing = Math.atan2(aim.y - this.y, aim.x - this.x);
     }
 
     const tickCd = (id: string, base: number) => this.readyCd(id, base);
 
     const L = this.weps.limitless;
-    if (L > 0 && tickCd("limitless", L >= 4 ? 0.42 : L >= 3 ? 0.52 : L >= 2 ? 0.62 : 0.72)) {
-      this.ring(78 + (L - 1) * 22, 16 + L * 3, 0);
-      if (L >= 3) this.ring(40 + L * 8, 11 + L * 2, 0);
-    }
-
-    const B = this.weps.blue;
-    if (B > 0 && tickCd("blue", Math.max(0.52, 1.02 - B * 0.08))) {
-      const n = B >= 4 ? 3 : B >= 2 ? 2 : 1;
-      const size = 8 + B * 3.2;
-      const pierce = B >= 3 ? 1 : 0;
-      for (let i = 0; i < n; i++) {
-        const t = aim ?? this.nearest(this.x, this.y);
-        const ang = t
-          ? Math.atan2(t.y - this.y, t.x - this.x) + (i - (n - 1) / 2) * 0.2
-          : this.facing;
-        this.shot(0, this.x, this.y, Math.cos(ang) * 280, Math.sin(ang) * 280, 10 + B * 4, 2.4, pierce, 1, size);
-      }
-      sfxSkill("blue");
+    if (L > 0 && tickCd("limitless", L >= 4 ? 0.55 : L >= 3 ? 0.64 : 0.78)) {
+      const rad = this.shellRadius() || 56;
+      this.ringAt(this.x, this.y, rad, 5 + L * 1.6, 0, true);
+      if (L >= 3) this.ringAt(this.x, this.y, rad * 0.55, 4 + L, 0, false);
     }
 
     if (this.weps.red > 0) this.volleyRed();
@@ -993,25 +1448,6 @@ export class HordeSim {
       for (let i = 0; i < n; i++) {
         const a = this.anim * (C >= 4 ? 2.8 : 2.2) + (i / n) * Math.PI * 2;
         this.orbitHit(this.x + Math.cos(a) * dist, this.y + Math.sin(a) * dist, 10 + C * 2.4, 11 + C * 2);
-      }
-    }
-
-    const S = this.weps.slash;
-    if (S > 0 && tickCd("slash", Math.max(0.34, 0.64 - S * 0.04))) {
-      const n = S >= 4 ? 2 : S >= 2 ? 2 : 1;
-      const size = 12 + S * 3.4;
-      const pierce = S >= 3 ? 2 : 0;
-      for (let i = 0; i < n; i++) {
-        const t = aim ?? this.nearest(this.x, this.y);
-        const ang = t
-          ? Math.atan2(t.y - this.y, t.x - this.x) + (i - (n - 1) / 2) * 0.22
-          : this.facing;
-        this.shot(4, this.x, this.y, Math.cos(ang) * 520, Math.sin(ang) * 520, 12 + S * 3.6, 0.44 + S * 0.03, pierce, 0, size);
-      }
-      if (S >= 4) {
-        const cross = this.facing + Math.PI / 2;
-        this.shot(4, this.x, this.y, Math.cos(cross) * 500, Math.sin(cross) * 500, 12 + S * 3, 0.4, 1, 0, size);
-        this.shot(4, this.x, this.y, Math.cos(cross + Math.PI) * 500, Math.sin(cross + Math.PI) * 500, 12 + S * 3, 0.4, 1, 0, size);
       }
     }
 
@@ -1058,16 +1494,18 @@ export class HordeSim {
     this.ringAt(this.x, this.y, rad, dmg, kind);
   }
 
-  ringAt(x: number, y: number, rad: number, dmg: number, kind: number) {
+  ringAt(x: number, y: number, rad: number, dmg: number, kind: number, rimFlash = false) {
     this.pushFx(x, y, rad, 0.48, kind === 1 ? 3 : kind === 3 ? 3 : 1, "", false);
     this.pushFx(x, y, rad * 0.45, 0.22, 18, "", false);
+    const band = 8 + this.weps.flash * 6;
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const d = Math.hypot(e.x - x, e.y - y);
       if (d < rad + e.r) {
         const nx = (e.x - x) / (d || 1);
         const ny = (e.y - y) / (d || 1);
-        this.hurtEnemy(e, dmg, nx * 90, ny * 90);
+        const onRim = rimFlash && d > rad - band;
+        this.hurtEnemy(e, dmg, nx * 90, ny * 90, false, onRim ? "rim" : "none");
       }
     }
   }
@@ -1081,21 +1519,13 @@ export class HordeSim {
     }
   }
 
-  cleave(rad: number, arc: number, dmg: number) {
-    const face = this.facing;
+  cleave(rad: number, _arc: number, _flat: number) {
     let hopped = 0;
-    this.pushFx(this.x, this.y, rad, 0.28, 8, "", false, face);
-    for (let i = -2; i <= 2; i++) {
-      this.pushFx(
-        this.x + Math.cos(face + i * 0.18) * (rad * 0.55),
-        this.y + Math.sin(face + i * 0.18) * (rad * 0.55),
-        rad * 0.35,
-        0.22,
-        9,
-        "",
-        false,
-        face + i * 0.18,
-      );
+    let tagged = false;
+    this.pushFx(this.x, this.y, rad, 0.28, 8, "", false, this.facing);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      this.pushFx(this.x + Math.cos(a) * (rad * 0.55), this.y + Math.sin(a) * (rad * 0.55), rad * 0.28, 0.2, 9, "", false, a);
     }
     for (const e of this.enemies) {
       if (!e.alive) continue;
@@ -1103,17 +1533,13 @@ export class HordeSim {
       const dy = e.y - this.y;
       const d = Math.hypot(dx, dy);
       if (d > rad + e.r) continue;
-      const ang = Math.atan2(dy, dx);
-      let diff = ang - face;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      if (Math.abs(diff) <= arc) {
-        this.hurtEnemy(e, dmg, (dx / d) * 80, (dy / d) * 80);
-        if (this.weps.plague > 0 && hopped < 2) {
-          e.mark = 0.45;
-          this.spreadPlague(e.x, e.y);
-          hopped += 1;
-        }
+      const tag: HitTag = !tagged && this.slashArmed ? "cleave" : "none";
+      if (tag === "cleave") tagged = true;
+      this.hurtEnemy(e, this.cleaveCut(e), (dx / (d || 1)) * 70, (dy / (d || 1)) * 70, false, tag);
+      if (this.weps.plague > 0 && hopped < 2) {
+        e.mark = 0.45;
+        this.spreadPlague(e.x, e.y);
+        hopped += 1;
       }
     }
   }
@@ -1190,7 +1616,7 @@ export class HordeSim {
         if ((e.x - b.x) ** 2 + (e.y - b.y) ** 2 > (e.r + b.r) ** 2) continue;
         const nx = (e.x - b.x) / 8;
         const ny = (e.y - b.y) / 8;
-        this.hurtEnemy(e, b.dmg, nx * 40, ny * 40);
+        this.hurtEnemy(e, b.dmg, nx * 40, ny * 40, false, b.kind === 4 ? "slash" : "none");
         if (b.kind === 0 && this.weps.ripple > 0) this.spreadRipple(e.x, e.y, false);
         if (b.kind === 4 && (this.weps.slash >= 3 || this.weps.plague >= 4)) {
           this.queueHop(e.x, e.y, this.weps.plague >= 4 ? Math.min(3, this.weps.plague) : 1, b.dmg * 0.5, 2, 120);
@@ -1211,10 +1637,12 @@ export class HordeSim {
     }
   }
 
-  hurtEnemy(e: Enemy, raw: number, kx: number, ky: number, fromChain = false) {
-    const fl = this.weps.flash;
-    const crit = fromChain || Math.random() < this.crit;
-    const dmg = raw * (crit ? this.critDmg : 1);
+  hurtEnemy(e: Enemy, raw: number, kx: number, ky: number, fromChain = false, tag: HitTag = "none") {
+    const flashed = !fromChain && this.tryBlackFlash(e, tag);
+    const crit = flashed || fromChain || this.bfBuff > 0 || Math.random() < this.crit;
+    let dmg = raw * (crit ? this.critDmg : 1);
+    if (flashed || this.bfBuff > 0) dmg *= this.bfMult() / (crit ? this.critDmg : 1);
+    dmg *= this.adaptHitBonus(e);
     e.hp -= dmg;
     e.hurt = 0.12;
     e.x += kx * 0.016;
@@ -1223,15 +1651,6 @@ export class HordeSim {
     for (let i = 0; i < (crit ? 6 : 3); i++) {
       this.pushFx(e.x, e.y, 6, 0.16, 13, "", crit, Math.random() * Math.PI * 2);
     }
-    if (crit && fl > 0) {
-      this.pushFx(e.x, e.y, 36 + fl * 12, 0.38, 5, "黑闪", true);
-      this.shake = Math.max(this.shake, 8 + fl * 2);
-      sfxCrit();
-      if (!fromChain) {
-        this.queueHop(e.x, e.y, fl, raw * this.critDmg, 0, 140 + fl * 36);
-      }
-    }
-    if (crit && fl > 0) this.hitstop = Math.max(this.hitstop, 0.06);
     if (e.hp <= 0) {
       e.alive = false;
       this.kills += 1;
@@ -1274,8 +1693,9 @@ export class HordeSim {
   }
 
   queueHop(x: number, y: number, hops: number, dmg: number, kind: 0 | 1 | 2, reach: number) {
-    this.chains.push({ x, y, hops, wait: kind === 0 ? 0.11 : 0.07, dmg, kind, reach });
-    this.pushFx(x, y, 26, 0.2, kind === 1 ? 16 : kind === 2 ? 17 : 5, "", kind === 0);
+    if (kind === 0) return;
+    this.chains.push({ x, y, hops, wait: 0.07, dmg, kind, reach });
+    this.pushFx(x, y, 26, 0.2, kind === 1 ? 16 : 17, "", false);
   }
 
   stepChains(dt: number) {
@@ -1284,7 +1704,7 @@ export class HordeSim {
       if (c.wait > 0) continue;
       let best: Enemy | null = null;
       let bd = 1e9;
-      const reach = c.reach || 120 + this.weps.flash * 28;
+      const reach = c.reach || 120;
       for (const e of this.enemies) {
         if (!e.alive) continue;
         const d = Math.hypot(e.x - c.x, e.y - c.y);
@@ -1299,16 +1719,14 @@ export class HordeSim {
         continue;
       }
       const ang = Math.atan2(best.y - c.y, best.x - c.x);
-      this.pushFx((c.x + best.x) / 2, (c.y + best.y) / 2, bd * 0.52, 0.2, 14, "", c.kind === 0, ang);
+      this.pushFx((c.x + best.x) / 2, (c.y + best.y) / 2, bd * 0.52, 0.2, 14, "", false, ang);
       if (c.kind === 1) this.pushFx(best.x, best.y, 34, 0.28, 16, "", false);
       if (c.kind === 2) this.pushFx(best.x, best.y, 36, 0.28, 17, "", false);
-      if (c.kind === 0) this.shake = Math.max(this.shake, 5);
-      const raw = c.kind === 0 ? c.dmg / this.critDmg : c.dmg;
-      this.hurtEnemy(best, raw, 0, 0, true);
+      this.hurtEnemy(best, c.dmg, 0, 0, true);
       c.x = best.x;
       c.y = best.y;
       c.hops -= 1;
-      c.wait = c.kind === 0 ? 0.12 : 0.08;
+      c.wait = 0.08;
     }
     this.chains = this.chains.filter((c) => c.hops > 0);
   }
@@ -1405,6 +1823,128 @@ export class HordeSim {
     }
   }
 
+  enemyAttack(e: Enemy) {
+    const d = Math.hypot(e.x - this.x, e.y - this.y);
+    if (e.kind === 2) {
+      e.atk = e.elite ? 1.35 : 1.85;
+      const ang = Math.atan2(this.y - e.y, this.x - e.x);
+      this.spawnHazard(0, e.x, e.y, Math.cos(ang) * 210, Math.sin(ang) * 210, 7, e.dmg * 0.7, 1.6, ang, 0, "projectile");
+    } else if (e.kind === 3) {
+      e.atk = 2.15;
+      if (d < 150) {
+        this.pushFx(e.x, e.y, 130, 0.35, 3, "", false);
+        if (d < 128 && this.invuln <= 0) this.hurtPlayer(e.dmg * 0.85, "explosion");
+      } else {
+        const ang = Math.atan2(this.y - e.y, this.x - e.x);
+        this.spawnHazard(1, e.x, e.y, 0, 0, 10, e.dmg * 0.55, 0.42, ang, 360, "laser");
+      }
+    } else {
+      e.atk = 2.2;
+    }
+  }
+
+  spawnHazard(
+    style: 0 | 1,
+    x: number,
+    y: number,
+    vx: number,
+    vy: number,
+    r: number,
+    dmg: number,
+    life: number,
+    ang: number,
+    len: number,
+    kind: DmgKind,
+  ) {
+    let h: Hazard | null = null;
+    for (let i = 0; i < MAX_HAZ; i++) {
+      const idx = (this.hi + i) % MAX_HAZ;
+      if (!this.hazards[idx]!.alive) {
+        h = this.hazards[idx]!;
+        this.hi = idx + 1;
+        break;
+      }
+    }
+    if (!h) return;
+    h.alive = true;
+    h.style = style;
+    h.x = x;
+    h.y = y;
+    h.vx = vx;
+    h.vy = vy;
+    h.r = r;
+    h.dmg = dmg;
+    h.life = life;
+    h.ang = ang;
+    h.len = len;
+    h.kind = kind;
+  }
+
+  stepHazards(dt: number) {
+    for (const h of this.hazards) {
+      if (!h.alive) continue;
+      h.life -= dt;
+      if (h.style === 0) {
+        h.x += h.vx * dt;
+        h.y += h.vy * dt;
+        if (this.invuln <= 0 && Math.hypot(h.x - this.x, h.y - this.y) < h.r + this.r) {
+          this.hurtPlayer(h.dmg, h.kind);
+          h.alive = false;
+        }
+      } else {
+        const x2 = h.x + Math.cos(h.ang) * h.len;
+        const y2 = h.y + Math.sin(h.ang) * h.len;
+        if (this.invuln <= 0 && distToSeg(this.x, this.y, h.x, h.y, x2, y2) < this.r + 8) {
+          this.hurtPlayer(h.dmg, h.kind);
+        }
+      }
+      if (h.life <= 0) h.alive = false;
+    }
+  }
+
+  stepShell(dt: number) {
+    if (this.charId !== "gojo" || this.weps.limitless < 1) {
+      this.shellLoad = 0;
+      this.shellLeak = false;
+      this.shellPress = 0;
+      this.overload = 0;
+      return;
+    }
+    const R = this.shellRadius();
+    const C = this.shellCapacity();
+    this.shellCap = C;
+    let press = 0;
+    this.fieldAcc += dt;
+    const tick = this.fieldAcc >= 0.16;
+    const dps = this.fieldDps() * (this.shellLeak ? 0.4 : 1);
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const d = Math.hypot(e.x - this.x, e.y - this.y);
+      if (d > R + e.r + 8) continue;
+      press += this.enemyMass(e);
+      if (this.fodder(e) && tick) this.hurtEnemy(e, dps * 0.16, 0, 0, true);
+    }
+    for (const h of this.hazards) {
+      if (!h.alive) continue;
+      if (Math.hypot(h.x - this.x, h.y - this.y) < R + 16) press += 1.7;
+    }
+    this.shellPress = press;
+    const regen = this.shellRegen();
+    if (press > regen * 0.12) this.shellLoad += press * dt;
+    if (press < regen) {
+      const drain = (regen - press) * dt * (this.shellLeak ? 0.42 : 1);
+      this.shellLoad = Math.max(0, this.shellLoad - drain);
+    }
+    if (this.shellLeak) {
+      if (this.shellLoad < C * 0.55 && press < regen) this.shellLeak = false;
+    } else if (this.shellLoad >= C) {
+      this.shellLeak = true;
+      this.line = "无下限。满了。";
+    }
+    this.overload = C > 0 ? this.shellLoad / C : 0;
+    if (tick) this.fieldAcc = 0;
+  }
+
   castDash() {
     if (this.dashCd > 0 || this.dashT > 0) return;
     let nx = this.ax;
@@ -1449,7 +1989,7 @@ export class HordeSim {
       for (const e of this.enemies) {
         if (!e.alive) continue;
         const d = distToSeg(e.x, e.y, this.dx0, this.dy0, this.x, this.y);
-        if (d < e.r + 18 && e.hurt <= 0) this.hurtEnemy(e, 18 + this.weps.slash * 3, 0, 0);
+        if (d < e.r + 18 && e.hurt <= 0) this.hurtEnemy(e, 18 + this.weps.slash * 3, 0, 0, false, "dash");
       }
     }
     if (u >= 1) {
@@ -1458,6 +1998,7 @@ export class HordeSim {
       this.y = this.dy1;
       this.vx = 0;
       this.vy = 0;
+      this.openBfWindow();
       if (this.charId === "gojo") this.pushFx(this.x, this.y, 46, 0.22, 1, "", false);
       else this.pushFx(this.x, this.y, 52, 0.22, 9, "", false, this.facing);
     }
@@ -1558,18 +2099,14 @@ export class HordeSim {
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const d = Math.hypot(e.x - this.x, e.y - this.y);
-      if (d < e.r + this.r - 2) {
-        this.hp -= e.dmg;
-        this.invuln = 0.7;
-        const nx = (this.x - e.x) / (d || 1);
-        const ny = (this.y - e.y) / (d || 1);
-        this.x += nx * 28;
-        this.y += ny * 28;
-        this.shake = Math.max(this.shake, 8);
-        sfxHurt();
-        this.line = CHAR_MAP[this.charId].hitLine;
-        break;
-      }
+      if (d >= e.r + this.r - 2) continue;
+      if (this.fodder(e) && !this.shellLeak && this.shellRadius() > 0) continue;
+      this.hurtPlayer(e.dmg, "contact");
+      const nx = (this.x - e.x) / (d || 1);
+      const ny = (this.y - e.y) / (d || 1);
+      this.x = clamp(this.x + nx * 28, 40, WORLD - 40);
+      this.y = clamp(this.y + ny * 28, 40, WORLD - 40);
+      break;
     }
   }
 
@@ -1713,6 +2250,61 @@ export class HordeSim {
       ctx.fillRect(0, 0, w, h);
     }
 
+    if (this.bfPunch > 0) {
+      ctx.fillStyle = `rgba(8,8,12,${0.42 * this.bfPunch})`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = `rgba(239,232,216,${0.55 * this.bfPunch})`;
+      ctx.lineWidth = 10;
+      ctx.strokeRect(8, 8, w - 16, h - 16);
+    }
+
+    const shellR = this.shellRadius();
+    if (shellR > 0) {
+      const px = this.x - camx;
+      const py = this.y - camy;
+      const load = this.overload;
+      const strain = load > 0.7 || this.shellLeak;
+      const flicker = strain && Math.floor(this.anim * 18) % 2 === 0;
+      const a = this.shellLeak ? 0.16 : flicker ? 0.18 : 0.32 + Math.min(0.25, load * 0.2);
+      ctx.strokeStyle = this.shellLeak ? `rgba(196,76,76,${a})` : `rgba(126,232,228,${a})`;
+      ctx.lineWidth = this.shellLeak ? 1.4 : strain ? 1.8 : 2.6;
+      ctx.beginPath();
+      ctx.arc(px, py, shellR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = this.shellLeak ? `rgba(196,76,76,0.04)` : `rgba(126,232,228,0.05)`;
+      ctx.beginPath();
+      ctx.arc(px, py, shellR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (this.charId === "sukuna" && this.weps.adapt > 0) {
+      const px = this.x - camx;
+      const py = this.y - camy;
+      const kinds: DmgKind[] = ["contact", "projectile", "laser", "explosion"];
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(this.anim * 0.7 + this.adaptTurns * 1.2);
+      for (let i = 0; i < 4; i++) {
+        const a0 = (i / 4) * Math.PI * 2;
+        const k = kinds[i]!;
+        const on = this.adaptOn === k || this.adaptHeld === k;
+        ctx.strokeStyle = on ? "rgba(196,76,76,0.85)" : "rgba(239,232,216,0.28)";
+        ctx.lineWidth = on ? 3 : 1.4;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a0) * 10, Math.sin(a0) * 10);
+        ctx.lineTo(Math.cos(a0) * 26, Math.sin(a0) * 26);
+        ctx.stroke();
+      }
+      if (this.adaptPulse > 0) {
+        ctx.strokeStyle = `rgba(196,76,76,${this.adaptPulse})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 30, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     if (this.hasMove) {
       const mx = this.tx - camx;
       const my = this.ty - camy;
@@ -1810,6 +2402,26 @@ export class HordeSim {
           ctx.lineWidth = 2;
           ctx.stroke();
         }
+      }
+    }
+
+    for (const h of this.hazards) {
+      if (!h.alive) continue;
+      if (h.style === 0) {
+        ctx.fillStyle = "rgba(196,76,76,0.8)";
+        ctx.beginPath();
+        ctx.arc(h.x - camx, h.y - camy, h.r, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = "rgba(255,120,70,0.7)";
+        ctx.lineWidth = 7;
+        ctx.beginPath();
+        ctx.moveTo(h.x - camx, h.y - camy);
+        ctx.lineTo(h.x + Math.cos(h.ang) * h.len - camx, h.y + Math.sin(h.ang) * h.len - camy);
+        ctx.stroke();
+        ctx.restore();
       }
     }
 
@@ -2104,6 +2716,26 @@ export class HordeSim {
         ctx.lineWidth = 3;
         ctx.stroke();
         ctx.globalCompositeOperation = "source-over";
+      } else if (f.kind === 19) {
+        ctx.strokeStyle = `rgba(8,8,12,${0.7 * a})`;
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.arc(fx, fy, f.r * (1.1 - a * 0.3), 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (f.kind === 20) {
+        ctx.strokeStyle = `rgba(196,76,76,${0.8 * a})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(fx, fy, f.r * (1.2 - a * 0.4), 0, Math.PI * 2);
+        ctx.stroke();
+        if (f.text) {
+          ctx.font = "700 14px IBM Plex Mono, monospace";
+          ctx.fillStyle = "#c44c4c";
+          ctx.globalAlpha = a;
+          ctx.textAlign = "center";
+          ctx.fillText(f.text, fx, fy - f.r);
+          ctx.globalAlpha = 1;
+        }
       } else if (f.kind === 2 && f.text) {
         ctx.font = f.crit ? "700 16px IBM Plex Mono, monospace" : "500 12px IBM Plex Mono, monospace";
         ctx.fillStyle = f.crit ? "#efe8d8" : "#7ee8e4";

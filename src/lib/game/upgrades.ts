@@ -19,7 +19,8 @@ export type UpgradeId =
   | "ripple"
   | "ray"
   | "plague"
-  | "beam";
+  | "beam"
+  | "adapt";
 
 export type OfferTag = "新术" | "进化" | "支援" | "合成" | "术域";
 
@@ -47,6 +48,11 @@ function steps(lines: string[]) {
   return (lv: number) => lines[Math.max(0, Math.min(lines.length, lv) - 1)] ?? lines[0]!;
 }
 
+export const STARTER_IDS: Record<CharId, UpgradeId[]> = {
+  gojo: ["limitless", "blue"],
+  sukuna: ["slash", "cleave"],
+};
+
 export const VERBS: Record<CharId, UpgradeId[]> = {
   gojo: ["limitless", "blue", "red", "clone", "ripple", "ray", "purple"],
   sukuna: ["slash", "cleave", "blades", "plague", "beam", "flame"],
@@ -54,22 +60,22 @@ export const VERBS: Record<CharId, UpgradeId[]> = {
 
 export const SUPPORTS: Record<CharId, UpgradeId[]> = {
   gojo: ["eyes", "flash", "rct", "speed"],
-  sukuna: ["sense", "flash", "rct", "speed"],
+  sukuna: ["sense", "flash", "rct", "speed", "adapt"],
 };
 
 export const UPGRADES: UpgradeDef[] = [
   {
     id: "limitless",
-    name: "无极",
+    name: "无下限",
     kana: "无穷",
     max: 4,
     who: ["gojo"],
     role: "verb",
     desc: steps([
-      "贴身脉冲。半径 78。这是你的底。",
-      "圈到 100。靠近的都摊平。",
-      "双圈。里外各打一记。",
-      "双圈加快。真空把人吸进来再碾。",
+      "被动。小圈挡苍蝇。四五只扛得住，八只叠上来就漏。",
+      "圈和容量变大。苍蝇更难摸到。过载会漏。",
+      "苍蝇死在外沿。精英、血涂、灾核照样穿。",
+      "容量再涨。只有规则破坏者能杀你。",
     ]),
   },
   {
@@ -80,7 +86,7 @@ export const UPGRADES: UpgradeDef[] = [
     who: ["gojo"],
     role: "verb",
     desc: steps([
-      "一颗追踪球。会拐弯。",
+      "左键。一颗追踪球，朝你点的地方飞。",
       "两颗同时飞。",
       "两颗会穿孔。球更大。",
       "三颗死咬。这是苍的路。",
@@ -149,7 +155,7 @@ export const UPGRADES: UpgradeDef[] = [
     who: ["sukuna"],
     role: "verb",
     desc: steps([
-      "一道斩。切开面前。",
+      "左键。一道斩，朝你点的方向切开。",
       "两道并排。",
       "两道穿孔。斩更长。",
       "三道十字。空气也是刃。",
@@ -163,10 +169,10 @@ export const UPGRADES: UpgradeDef[] = [
     who: ["sukuna"],
     role: "verb",
     desc: steps([
-      "近身一扇。W 也能立刻拆。",
-      "扇面加宽。",
-      "半圆横扫。贴脸的都碎。",
-      "整圈拆开。站在刀口中央。",
+      "被动。贴身按硬度拆。苍蝇两下没，灾核只掉一块。",
+      "圈更大。百分比更深。",
+      "拆得更勤。精英也掉一块。",
+      "整圈拆开。还是百分比。W 立刻再拆。",
     ]),
   },
   {
@@ -218,9 +224,9 @@ export const UPGRADES: UpgradeDef[] = [
     who: "all",
     role: "support",
     desc: steps([
-      "暴击跳 1 个。弧光看得见。",
-      "连锁 2 跳。更远。",
-      "连锁 3 跳。黑闪自己找人。",
+      "对上了。Q 后、无极外沿、或斩的第一刀。黑一下，下一刀更重。",
+      "窗口更宽更长。对上之后那几下更狠。",
+      "还能再黑一次。别连按，对间距。",
     ]),
   },
   {
@@ -316,6 +322,19 @@ export const UPGRADES: UpgradeDef[] = [
       "刃更宽。",
       "扫得更远。",
       "两道交叉。空气开膛。",
+    ]),
+  },
+  {
+    id: "adapt",
+    name: "魔虚罗",
+    kana: "轮转",
+    max: 3,
+    who: ["sukuna"],
+    role: "support",
+    desc: steps([
+      "同一种伤叠轮。转一格，那种伤变轻，你反过来吃它。",
+      "转得更快。抗得更死。",
+      "留下上一格。换招的还会疼。",
     ]),
   },
 ];
@@ -437,8 +456,8 @@ export function rollPicks(
 
   const verbs = VERBS[char];
   const supports = SUPPORTS[char];
-  const starter: UpgradeId = char === "gojo" ? "limitless" : "slash";
-  const extraVerbs = verbs.filter((id) => id !== starter && (weps[id] ?? 0) > 0).length;
+  const starters = STARTER_IDS[char];
+  const extraVerbs = verbs.filter((id) => !starters.includes(id) && (weps[id] ?? 0) > 0).length;
   const newVerbs = verbs.filter((id) => (weps[id] ?? 0) === 0 && allowed.has(id));
   const evolvable = pool.filter((u) => (weps[u.id] ?? 0) > 0).map((u) => u.id);
 
@@ -460,7 +479,7 @@ export function rollPicks(
         evolvable.filter((id) => !taken.has(id)),
         (id) => {
           const lv = weps[id] ?? 0;
-          return 0.8 + lv * 1.35 + (id === lastPick ? 2.2 : 0) + (id === starter ? 0.35 : 0.7);
+          return 0.8 + lv * 1.35 + (id === lastPick ? 2.2 : 0) + (starters.includes(id) ? 0.35 : 0.7);
         },
         rng,
       ),

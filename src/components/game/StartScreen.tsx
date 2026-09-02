@@ -100,7 +100,7 @@ export function StartScreen({
               })}
             </div>
             <div className="mt-4 text-xs text-mute">
-              {meta.extraStart ? "起手加一已开。苍 / 捌会先到手。" : "活过一分半或通关，起手加一。"}
+              {meta.extraStart ? "起手加一已开。赫 / 厨刀会先到手。" : "活过一分半或通关，起手再加一。"}
             </div>
           </div>
         ) : (

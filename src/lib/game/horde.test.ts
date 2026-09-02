@@ -1,20 +1,23 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { CLEAR_TIME, EXTRA_START, HordeSim } from "./horde.ts";
+import { CLEAR_TIME, EXTRA_START, HordeSim, WORLD } from "./horde.ts";
 
 describe("HordeSim", () => {
   it("starts with the character kit and extra start weapon", () => {
     const gojo = new HordeSim("gojo");
     assert.equal(gojo.charId, "gojo");
     assert.equal(gojo.weps.limitless, 1);
-    assert.equal(gojo.weps.blue, 0);
+    assert.equal(gojo.weps.blue, 1);
+    assert.equal(gojo.hud().activeName, "苍");
 
     const plus = new HordeSim("sukuna", { extraStart: true });
     assert.equal(plus.weps.slash, 1);
+    assert.equal(plus.weps.cleave, 1);
     assert.equal(plus.weps[EXTRA_START.sukuna], 1);
     const w = plus.hud().skills.find((s) => s.key === "W");
     assert.equal(w?.unlocked, true);
     assert.equal(w?.name, "捌");
+    assert.equal(plus.hud().activeName, "解");
   });
 
   it("walks toward a move target and stops on arrival", () => {
@@ -90,9 +93,8 @@ describe("HordeSim", () => {
       ["瞬斩", "捌", "开", "伏魔"],
     );
     assert.equal(slots.find((s) => s.key === "Q")?.unlocked, true);
-    assert.equal(slots.find((s) => s.key === "W")?.unlocked, false);
+    assert.equal(slots.find((s) => s.key === "W")?.unlocked, true);
 
-    sim.weps.cleave = 1;
     sim.castW();
     assert.ok((sim.cd.cleave ?? 0) > 0);
 
@@ -175,6 +177,7 @@ describe("HordeSim", () => {
     assert.equal(hud.skills.find((s) => s.key === "W")?.rank, 2);
     assert.equal(hud.skills.find((s) => s.key === "E")?.rank, 1);
     assert.equal(hud.weps.some((w) => w.id === "limitless" && w.lv === 1), true);
+    assert.equal(hud.weps.some((w) => w.id === "blue" && w.lv === 1), true);
   });
 
   it("evolves 无极 into a double pulse at rank 3", () => {
@@ -235,5 +238,139 @@ describe("HordeSim", () => {
     sim.tick(0.2);
     assert.equal(sim.time, t);
     assert.equal(sim.over, true);
+  });
+
+  it("does not auto-fire 苍 or 解 without LMB / stick", () => {
+    const gojo = new HordeSim("gojo");
+    gojo.tick(0.6);
+    assert.equal(gojo.bullets.filter((b) => b.alive && b.kind === 0).length, 0);
+    gojo.setAimWorld(gojo.x + 200, gojo.y);
+    gojo.wantFire = true;
+    gojo.tick(0.02);
+    assert.ok(gojo.bullets.some((b) => b.alive && b.kind === 0));
+
+    const sukuna = new HordeSim("sukuna");
+    sukuna.tick(0.5);
+    assert.equal(sukuna.bullets.filter((b) => b.alive && b.kind === 4).length, 0);
+    sukuna.setFireStick(1, 0);
+    sukuna.tick(0.02);
+    assert.ok(sukuna.bullets.some((b) => b.alive && b.kind === 4));
+  });
+
+  it("does not treat letter keys as basic attack", () => {
+    const sim = new HordeSim("gojo");
+    sim.setKeys(["KeyA", "KeyS", "KeyD"]);
+    sim.tick(0.5);
+    assert.equal(sim.bullets.filter((b) => b.alive && b.kind === 0).length, 0);
+    assert.equal(sim.x, WORLD / 2);
+  });
+
+  it("cuts 捌 as a percent of target max HP", () => {
+    const sim = new HordeSim("sukuna");
+    sim.birth(0, { near: true });
+    sim.birth(3, { near: true });
+    const fly = sim.enemies.find((e) => e.alive && e.kind === 0)!;
+    const boss = sim.enemies.find((e) => e.alive && e.kind === 3)!;
+    fly.x = sim.x + 20;
+    fly.y = sim.y;
+    boss.x = sim.x + 24;
+    boss.y = sim.y;
+    const flyCut = sim.cleaveCut(fly);
+    const bossCut = sim.cleaveCut(boss);
+    assert.ok(flyCut > fly.max * 0.3);
+    assert.ok(flyCut < fly.max * 0.7);
+    assert.ok(bossCut < boss.max * 0.12);
+    assert.ok(bossCut > 8);
+    const hpF = fly.hp;
+    const hpB = boss.hp;
+    sim.cd.cleave = 0;
+    sim.volleyCleave();
+    assert.ok(fly.hp < hpF);
+    assert.ok(boss.hp < hpB);
+    assert.ok(boss.hp > boss.max * 0.7);
+  });
+
+  it("holds a few flyheads and leaks when smothered; 灾核 still hits", () => {
+    const sim = new HordeSim("gojo");
+    sim.weps.limitless = 1;
+    sim.applyStats();
+    for (let i = 0; i < 5; i++) {
+      sim.birth(0, { near: true });
+      const e = sim.enemies.filter((x) => x.alive).at(-1)!;
+      e.x = sim.x + 20 + i;
+      e.y = sim.y;
+    }
+    const hp0 = sim.hp;
+    for (let i = 0; i < 40; i++) sim.stepShell(0.05);
+    assert.equal(sim.shellLeak, false);
+    assert.equal(sim.hp, hp0);
+    sim.invuln = 0;
+    sim.contact();
+    assert.equal(sim.hp, hp0);
+
+    for (let i = 0; i < 8; i++) {
+      sim.birth(0, { near: true });
+      const e = sim.enemies.filter((x) => x.alive).at(-1)!;
+      e.x = sim.x + 18;
+      e.y = sim.y + i;
+    }
+    for (let i = 0; i < 50; i++) sim.stepShell(0.05);
+    assert.equal(sim.shellLeak, true);
+
+    const mid = new HordeSim("gojo");
+    mid.weps.limitless = 2;
+    mid.applyStats();
+    mid.birth(0, { near: true });
+    const fly = mid.enemies.find((e) => e.alive)!;
+    fly.x = mid.x + 6;
+    fly.y = mid.y;
+    mid.invuln = 0;
+    mid.contact();
+    assert.equal(mid.hp, 100);
+
+    mid.birth(3, { near: true });
+    const boss = mid.enemies.find((e) => e.alive && e.kind === 3)!;
+    boss.x = mid.x;
+    boss.y = mid.y;
+    mid.invuln = 0;
+    mid.contact();
+    assert.ok(mid.hp < 100);
+  });
+
+  it("treats Black Flash as a timing state, not a bounce", () => {
+    const sim = new HordeSim("gojo");
+    sim.weps.flash = 2;
+    sim.applyStats();
+    sim.castDash();
+    for (let i = 0; i < 12; i++) sim.stepDash(0.02);
+    assert.ok(sim.bfWindow > 0);
+    sim.birth(0, { near: true });
+    const e = sim.enemies.find((x) => x.alive)!;
+    e.x = sim.x + 30;
+    e.y = sim.y;
+    sim.hurtEnemy(e, 8, 0, 0, false, "none");
+    assert.ok(sim.bfHits >= 1);
+    assert.ok(sim.bfBuff > 0);
+    assert.equal(sim.chains.filter((c) => c.kind === 0).length, 0);
+  });
+
+  it("turns Sukuna's wheel after repeated contact", () => {
+    const sim = new HordeSim("sukuna");
+    sim.weps.adapt = 1;
+    sim.applyStats();
+    for (let i = 0; i < 5; i++) {
+      sim.invuln = 0;
+      sim.hurtPlayer(3, "contact");
+    }
+    assert.equal(sim.adaptOn, "contact");
+    assert.ok(sim.adaptTurns >= 1);
+    const hp = sim.hp;
+    sim.invuln = 0;
+    sim.hurtPlayer(20, "contact");
+    assert.ok(sim.hp > hp - 20);
+    sim.adaptFill = 2;
+    sim.adaptFocus = "contact";
+    sim.feedAdapt("laser");
+    assert.ok(sim.adaptFill < 2);
   });
 });
