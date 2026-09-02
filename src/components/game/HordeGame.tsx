@@ -10,21 +10,25 @@ import { UPGRADE_MAP, type UpgradeId } from "@/lib/game/upgrades";
 import { cn } from "@/lib/utils";
 
 function SkillButton({
+  slotKey,
   label,
   ready,
+  unlocked,
   cd,
   max,
   onClick,
   accent,
 }: {
+  slotKey: string;
   label: string;
   ready: boolean;
+  unlocked: boolean;
   cd: number;
   max: number;
   onClick: () => void;
   accent: "ice" | "blood" | "paper";
 }) {
-  const t = max > 0 ? Math.max(0, Math.min(1, 1 - cd / max)) : 1;
+  const t = !unlocked ? 0 : max > 0 ? Math.max(0, Math.min(1, 1 - cd / max)) : 1;
   const ring =
     accent === "blood" ? "#c44c4c" : accent === "ice" ? "#7ee8e4" : "#efe8d8";
   return (
@@ -33,7 +37,7 @@ function SkillButton({
       disabled={!ready}
       onClick={onClick}
       className={cn(
-        "relative h-14 min-w-14 overflow-hidden rounded-full border px-3 text-sm font-medium",
+        "relative h-14 min-w-[3.6rem] overflow-hidden rounded-full border px-3 text-sm font-medium",
         ready ? "border-line bg-paper text-ink" : "border-line bg-ink-2 text-mute",
       )}
     >
@@ -44,7 +48,10 @@ function SkillButton({
           background: `conic-gradient(${ring} ${t * 360}deg, transparent 0deg)`,
         }}
       />
-      <span className="relative z-10">{ready ? label : Math.ceil(cd)}</span>
+      <span className="relative z-10 flex flex-col items-center leading-none">
+        <span className="text-[10px] tracking-wider text-mute">{slotKey}</span>
+        <span className="mt-0.5">{!unlocked ? "—" : ready ? label : Math.ceil(cd)}</span>
+      </span>
     </button>
   );
 }
@@ -60,12 +67,10 @@ export function HordeGame({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const simRef = useRef(new HordeSim(charId, { extraStart }));
-  const stickId = useRef<number | null>(null);
-  const origin = useRef({ x: 0, y: 0 });
+  const movePtr = useRef<number | null>(null);
   const [hud, setHud] = useState<HudSnap>(() => simRef.current.hud());
   const [ready, setReady] = useState(false);
   const [muted, setMutedState] = useState(() => loadMeta().muted);
-  const [stick, setStick] = useState({ active: false, x: 0, y: 0 });
   const [unlocks, setUnlocks] = useState<string[]>([]);
 
   useEffect(() => {
@@ -100,7 +105,17 @@ export function HordeGame({
         return;
       }
       if (e.repeat) return;
-      if (e.code === "Space") e.preventDefault();
+      if (e.code === "Space") {
+        e.preventDefault();
+        return;
+      }
+      if (e.code === "KeyQ") sim.wantDash = true;
+      if (e.code === "KeyW") sim.wantSecondary = true;
+      if (e.code === "KeyE") sim.wantBurst = true;
+      if (e.code === "KeyR" && !sim.over) sim.wantDomain = true;
+      if (e.code === "KeyQ" || e.code === "KeyW" || e.code === "KeyE" || e.code === "KeyR") {
+        e.preventDefault();
+      }
       sim.keys.add(e.code);
       unlockAudio();
     };
@@ -126,9 +141,9 @@ export function HordeGame({
       getX: () => sim.getX(),
       setKeys: (codes: string[]) => sim.setKeys(codes),
       setSteer: (v: number) => {
-        sim.stickX = -v;
-        sim.stickY = 0;
+        sim.setMoveTarget(sim.x - v * 180, sim.y);
       },
+      setMoveTarget: (x: number, y: number) => sim.setMoveTarget(x, y),
     };
     window.__controlsTest = probe;
     window.__hordeTest = {
@@ -145,6 +160,7 @@ export function HordeGame({
         return sim.hud();
       },
       hud: () => sim.hud(),
+      setMoveTarget: (x: number, y: number) => sim.setMoveTarget(x, y),
     };
     return () => {
       if (window.__controlsTest === probe) delete window.__controlsTest;
@@ -233,21 +249,11 @@ export function HordeGame({
     setHud(simRef.current.hud());
   }
 
-  function setStickFrom(clientX: number, clientY: number, originX: number, originY: number) {
-    const dx = clientX - originX;
-    const dy = clientY - originY;
-    const mag = Math.hypot(dx, dy);
-    const max = 46;
-    const nx = mag > 0.001 ? dx / mag : 0;
-    const ny = mag > 0.001 ? dy / mag : 0;
-    const clamped = Math.min(1, mag / max);
-    simRef.current.stickX = nx * clamped;
-    simRef.current.stickY = ny * clamped;
-    setStick({
-      active: true,
-      x: nx * clamped * max,
-      y: ny * clamped * max,
-    });
+  function aimAt(clientX: number, clientY: number) {
+    const cvs = canvasRef.current;
+    if (!cvs) return;
+    const rect = cvs.getBoundingClientRect();
+    simRef.current.setMoveFromScreen(clientX - rect.left, clientY - rect.top, rect.width, rect.height);
   }
 
   const ch = CHAR_MAP[hud.charId];
@@ -255,8 +261,33 @@ export function HordeGame({
   const blocking = Boolean(hud.picks || hud.userPaused || hud.over);
 
   return (
-    <div className="relative h-dvh overflow-hidden bg-ink text-paper">
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
+    <div className="relative h-dvh overflow-hidden bg-ink text-paper" onContextMenu={(e) => e.preventDefault()}>
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 h-full w-full touch-none"
+        onContextMenu={(e) => e.preventDefault()}
+        onPointerDown={(e) => {
+          if (blocking) return;
+          const move = e.pointerType !== "mouse" || e.button === 2;
+          if (!move) return;
+          e.preventDefault();
+          unlockAudio();
+          movePtr.current = e.pointerId;
+          (e.currentTarget as HTMLCanvasElement).setPointerCapture(e.pointerId);
+          aimAt(e.clientX, e.clientY);
+        }}
+        onPointerMove={(e) => {
+          if (movePtr.current !== e.pointerId) return;
+          aimAt(e.clientX, e.clientY);
+        }}
+        onPointerUp={(e) => {
+          if (movePtr.current !== e.pointerId) return;
+          movePtr.current = null;
+        }}
+        onPointerCancel={() => {
+          movePtr.current = null;
+        }}
+      />
 
       {!ready && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-ink text-sm text-mute">
@@ -340,87 +371,33 @@ export function HordeGame({
         )}
       </header>
 
-      <div
-        className="absolute bottom-0 left-0 z-10 h-52 w-[46%] touch-none md:pointer-events-none"
-        onPointerDown={(e) => {
-          if (blocking) return;
-          if (e.pointerType === "mouse") return;
-          unlockAudio();
-          stickId.current = e.pointerId;
-          origin.current = { x: e.clientX, y: e.clientY };
-          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-          setStickFrom(e.clientX, e.clientY, e.clientX, e.clientY);
-        }}
-        onPointerMove={(e) => {
-          if (stickId.current !== e.pointerId) return;
-          setStickFrom(e.clientX, e.clientY, origin.current.x, origin.current.y);
-        }}
-        onPointerUp={(e) => {
-          if (stickId.current !== e.pointerId) return;
-          stickId.current = null;
-          simRef.current.stickX = 0;
-          simRef.current.stickY = 0;
-          setStick({ active: false, x: 0, y: 0 });
-        }}
-        onPointerCancel={() => {
-          stickId.current = null;
-          simRef.current.stickX = 0;
-          simRef.current.stickY = 0;
-          setStick({ active: false, x: 0, y: 0 });
-        }}
-      >
-        <div className="pointer-events-none absolute bottom-[max(1.4rem,env(safe-area-inset-bottom))] left-5 size-28 rounded-full border border-line bg-ink-2/70 md:hidden">
-          <div
-            className="absolute left-1/2 top-1/2 size-11 -translate-x-1/2 -translate-y-1/2 rounded-full bg-paper"
-            style={{
-              transform: `translate(calc(-50% + ${stick.x}px), calc(-50% + ${stick.y}px))`,
-            }}
-          />
-        </div>
-      </div>
-
       <div className="absolute bottom-[max(1.4rem,env(safe-area-inset-bottom))] right-4 z-10 flex flex-col items-end gap-2">
-        {hud.weps.some((w) => w.id === "domain") && (
-          <SkillButton
-            label={ch.domainName.slice(0, 2)}
-            ready={hud.domainReady}
-            cd={hud.domainCd}
-            max={hud.domainMax}
-            accent={ice ? "ice" : "blood"}
-            onClick={() => {
-              unlockAudio();
-              simRef.current.wantDomain = true;
-            }}
-          />
-        )}
-        {hud.weps.some((w) => w.id === "purple") && (
-          <SkillButton
-            label="虚式"
-            ready={hud.purpleReady}
-            cd={hud.purpleCd}
-            max={hud.purpleMax}
-            accent="ice"
-            onClick={() => {
-              unlockAudio();
-              simRef.current.wantPurple = true;
-            }}
-          />
-        )}
-        <SkillButton
-          label={hud.dashReady ? ch.dashName : `${Math.ceil(hud.dashCd)}`}
-          ready={hud.dashReady}
-          cd={hud.dashCd}
-          max={hud.dashMax}
-          accent="paper"
-          onClick={() => {
-            unlockAudio();
-            simRef.current.wantDash = true;
-          }}
-        />
+        {hud.skills
+          .slice()
+          .reverse()
+          .map((s) => (
+            <SkillButton
+              key={s.key}
+              slotKey={s.key}
+              label={s.name}
+              ready={s.ready}
+              unlocked={s.unlocked}
+              cd={s.cd}
+              max={s.max}
+              accent={s.key === "Q" ? "paper" : ice ? "ice" : "blood"}
+              onClick={() => {
+                unlockAudio();
+                if (s.key === "Q") simRef.current.wantDash = true;
+                if (s.key === "W") simRef.current.wantSecondary = true;
+                if (s.key === "E") simRef.current.wantBurst = true;
+                if (s.key === "R") simRef.current.wantDomain = true;
+              }}
+            />
+          ))}
       </div>
 
       <p className="pointer-events-none absolute bottom-3 left-1/2 z-10 hidden -translate-x-1/2 text-xs text-mute md:block">
-        WASD 走 · Shift {ch.dashName} · E 虚式 · 空格术域 · Esc 暂停
+        右键点地走 · Q {ch.dashName} · W {ice ? "赫" : "捌"} · E {ice ? "虚式" : "开"} · R 术域 · Esc 暂停
       </p>
 
       {hud.picks && (
@@ -461,6 +438,7 @@ export function HordeGame({
           <div className="w-full max-w-sm rounded-xl border border-line bg-ink-2 p-6">
             <p className="font-display text-2xl text-paper">暂停</p>
             <p className="mt-2 text-sm text-mute">秽物不会等你。但这一秒可以。</p>
+            <p className="mt-1 text-xs text-mute">右键点地。QWER 术式。</p>
             <div className="mt-5 flex flex-col gap-2">
               <button
                 type="button"
@@ -533,12 +511,14 @@ declare global {
       getX: () => number;
       setKeys: (codes: string[]) => void;
       setSteer?: (v: number) => void;
+      setMoveTarget?: (x: number, y: number) => void;
     };
     __hordeTest?: {
       offer: () => HudSnap;
       finish: (won: boolean) => HudSnap;
       choose: (id: string) => HudSnap;
       hud: () => HudSnap;
+      setMoveTarget: (x: number, y: number) => void;
     };
   }
 }

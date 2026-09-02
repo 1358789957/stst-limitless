@@ -12,24 +12,94 @@ describe("HordeSim", () => {
     const plus = new HordeSim("sukuna", { extraStart: true });
     assert.equal(plus.weps.slash, 1);
     assert.equal(plus.weps[EXTRA_START.sukuna], 1);
+    const w = plus.hud().skills.find((s) => s.key === "W");
+    assert.equal(w?.unlocked, true);
+    assert.equal(w?.name, "捌");
   });
 
-  it("moves with WASD and pauses time", () => {
+  it("walks toward a move target and stops on arrival", () => {
     const sim = new HordeSim("gojo");
     const x0 = sim.x;
-    sim.setKeys(["KeyD"]);
+    sim.setMoveTarget(x0 + 240, sim.y);
     sim.tick(0.2);
     assert.ok(sim.x > x0);
     assert.ok(sim.getSpeed() > 0);
 
+    sim.x = sim.tx;
+    sim.y = sim.ty;
+    sim.tick(0.05);
+    assert.equal(sim.hasMove, false);
+    assert.equal(sim.getSpeed(), 0);
+  });
+
+  it("pauses time and ignores QWER while paused", () => {
+    const sim = new HordeSim("gojo");
     const t = sim.time;
     sim.togglePause();
     assert.equal(sim.userPaused, true);
+    sim.setKeys(["KeyQ", "KeyR"]);
     sim.tick(0.5);
     assert.equal(sim.time, t);
+    assert.equal(sim.dashT, 0);
     sim.togglePause();
     sim.tick(0.1);
     assert.ok(sim.time > t);
+  });
+
+  it("does not treat W as movement", () => {
+    const sim = new HordeSim("gojo");
+    const x0 = sim.x;
+    const y0 = sim.y;
+    sim.setKeys(["KeyW"]);
+    sim.tick(0.25);
+    assert.equal(sim.x, x0);
+    assert.equal(sim.y, y0);
+  });
+
+  it("maps QWER to dash, secondary, burst, domain", () => {
+    const sim = new HordeSim("gojo");
+    sim.setMoveTarget(sim.x + 400, sim.y);
+    sim.setKeys(["KeyQ"]);
+    sim.tick(0.016);
+    assert.ok(sim.dashCd > 0);
+    sim.keys.clear();
+
+    sim.weps.red = 1;
+    const beforeRed = sim.bullets.filter((b) => b.alive && b.kind === 1).length;
+    sim.castW();
+    assert.ok(sim.bullets.filter((b) => b.alive && b.kind === 1).length > beforeRed);
+
+    sim.castE();
+    assert.equal(sim.bullets.some((b) => b.alive && b.kind === 2), false);
+    sim.weps.purple = 1;
+    sim.castE();
+    assert.ok(sim.bullets.some((b) => b.alive && b.kind === 2));
+
+    sim.weps.domain = 1;
+    sim.setKeys(["KeyR"]);
+    sim.tick(0.016);
+    assert.equal(sim.usedDomain, true);
+    assert.ok(sim.domainCd > 0);
+  });
+
+  it("does not dash on Shift or domain on Space", () => {
+    const sim = new HordeSim("gojo");
+    sim.weps.domain = 1;
+    sim.setKeys(["ShiftLeft", "Space", "KeyF"]);
+    sim.tick(0.016);
+    assert.equal(sim.dashT, 0);
+    assert.equal(sim.usedDomain, false);
+  });
+
+  it("converts screen clicks through the camera", () => {
+    const sim = new HordeSim("gojo");
+    sim.camx = sim.x;
+    sim.camy = sim.y;
+    sim.setMoveFromScreen(640, 400, 1280, 800);
+    assert.ok(Math.abs(sim.tx - sim.x) < 1);
+    assert.ok(Math.abs(sim.ty - sim.y) < 1);
+    sim.setMoveFromScreen(1280, 400, 1280, 800);
+    assert.ok(sim.tx > sim.x + 200);
   });
 
   it("does not pause over a level-up pick", () => {
@@ -56,32 +126,6 @@ describe("HordeSim", () => {
     assert.equal(sim.weps[id], before + 1);
   });
 
-  it("dashes, fires purple after unlock, and expands domain", () => {
-    const sim = new HordeSim("gojo");
-    const x0 = sim.x;
-    sim.ax = 1;
-    sim.ay = 0;
-    sim.castDash();
-    assert.ok(sim.dashT > 0);
-    sim.tick(0.2);
-    assert.ok(sim.x > x0);
-    assert.ok(sim.dashCd > 0);
-
-    sim.castPurple();
-    assert.equal(sim.bullets.some((b) => b.alive && b.kind === 2), false);
-
-    sim.weps.purple = 1;
-    sim.castPurple();
-    assert.ok(sim.bullets.some((b) => b.alive && b.kind === 2));
-    assert.ok(sim.purpleCd > 0);
-
-    sim.weps.domain = 1;
-    sim.castDomain();
-    assert.equal(sim.usedDomain, true);
-    assert.ok(sim.freeze > 0);
-    assert.ok(sim.domainCd > 0);
-  });
-
   it("records death and time-clear", () => {
     const dead = new HordeSim("gojo");
     dead.hp = 0;
@@ -102,7 +146,8 @@ describe("HordeSim", () => {
     const sim = new HordeSim("gojo");
     sim.finish(false);
     const t = sim.time;
-    sim.setKeys(["KeyW"]);
+    sim.setMoveTarget(sim.x + 200, sim.y);
+    sim.setKeys(["KeyQ"]);
     sim.tick(0.2);
     assert.equal(sim.time, t);
     assert.equal(sim.over, true);

@@ -50,7 +50,7 @@ export const UPGRADES: UpgradeDef[] = [
     kana: "反转",
     max: 8,
     who: ["gojo"],
-    desc: (lv) => `斥力弹变粗，一次轰出 ${4 + lv} 发。`,
+    desc: (lv) => `斥力弹变粗，一次轰出 ${4 + lv} 发。W 可立刻再轰。`,
   },
   {
     id: "purple",
@@ -58,7 +58,7 @@ export const UPGRADES: UpgradeDef[] = [
     kana: "虚构",
     max: 6,
     who: ["gojo"],
-    desc: (lv) => `主动技。E 或右侧按钮放出贯穿光柱，柱体变宽。冷却缩短。`,
+    desc: (lv) => `主动技。E 放出贯穿光柱，柱体变宽。冷却缩短。`,
   },
   {
     id: "clone",
@@ -90,7 +90,7 @@ export const UPGRADES: UpgradeDef[] = [
     kana: "拆",
     max: 7,
     who: ["sukuna"],
-    desc: (lv) => `近身横扫半径变大，扇面更宽。`,
+    desc: (lv) => `近身横扫半径变大，扇面更宽。W 可立刻再拆。`,
   },
   {
     id: "flame",
@@ -98,7 +98,7 @@ export const UPGRADES: UpgradeDef[] = [
     kana: "火",
     max: 6,
     who: ["sukuna"],
-    desc: (lv) => `火矢爆炸圈变大，灼烧更狠。`,
+    desc: (lv) => `火矢爆炸圈变大，灼烧更狠。E 可立刻再开。`,
   },
   {
     id: "blades",
@@ -146,7 +146,7 @@ export const UPGRADES: UpgradeDef[] = [
     kana: "必中",
     max: 4,
     who: "all",
-    desc: () => "主动技。展开后全屏必中。空格或右侧按钮。",
+    desc: () => "主动技。展开后全屏必中。R 或右侧按钮。",
   },
 ];
 

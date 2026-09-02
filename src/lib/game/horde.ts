@@ -16,6 +16,7 @@ import { emptyWeps, rollPicks, UPGRADE_MAP, type UpgradeDef, type UpgradeId } fr
 export const WORLD = 2200;
 export const CLEAR_TIME = 180;
 export const DASH_COOLDOWN = 2.15;
+export const ARRIVE = 12;
 export const EXTRA_START: Record<CharId, UpgradeId> = {
   gojo: "blue",
   sukuna: "cleave",
@@ -128,6 +129,16 @@ export type HudSnap = {
   purpleReady: boolean;
   line: string;
   charId: CharId;
+  skills: SkillSlot[];
+};
+
+export type SkillSlot = {
+  key: "Q" | "W" | "E" | "R";
+  name: string;
+  ready: boolean;
+  unlocked: boolean;
+  cd: number;
+  max: number;
 };
 
 export type HordeOpts = {
@@ -144,7 +155,12 @@ export class HordeSim {
   keys = new Set<string>();
   wantDomain = false;
   wantDash = false;
+  wantSecondary = false;
+  wantBurst = false;
   wantPurple = false;
+  hasMove = false;
+  tx = 0;
+  ty = 0;
   charId: CharId = "gojo";
 
   x = WORLD / 2;
@@ -270,7 +286,12 @@ export class HordeSim {
     this.chains = [];
     this.wantDomain = false;
     this.wantDash = false;
+    this.wantSecondary = false;
+    this.wantBurst = false;
     this.wantPurple = false;
+    this.hasMove = false;
+    this.tx = this.x;
+    this.ty = this.y;
     this.enemies = Array.from({ length: MAX_E }, () => this.emptyE());
     this.bullets = Array.from({ length: MAX_B }, () => this.emptyB());
     this.gems = Array.from({ length: MAX_G }, () => ({ alive: false, x: 0, y: 0, v: 1 }));
@@ -377,7 +398,55 @@ export class HordeSim {
       purpleReady: P > 0 && this.purpleCd <= 0,
       line: this.line,
       charId: this.charId,
+      skills: this.skillSlots(),
     };
+  }
+
+  skillSlots(): SkillSlot[] {
+    const gojo = this.charId === "gojo";
+    const wId: UpgradeId = gojo ? "red" : "cleave";
+    const eId: UpgradeId = gojo ? "purple" : "flame";
+    const wLv = this.weps[wId];
+    const eLv = this.weps[eId];
+    const wMax = gojo ? Math.max(0.65, 1.3 - wLv * 0.06) : Math.max(0.7, 1.25 - wLv * 0.06);
+    const eMax = gojo ? Math.max(2, 4 - eLv * 0.28) : Math.max(1.4, 2.6 - eLv * 0.14);
+    const wCd = this.cd[wId] ?? 0;
+    const eCd = gojo ? this.purpleCd : (this.cd.flame ?? 0);
+    const ch = CHAR_MAP[this.charId];
+    return [
+      {
+        key: "Q",
+        name: ch.dashName,
+        unlocked: true,
+        ready: this.dashCd <= 0 && this.dashT <= 0,
+        cd: this.dashCd,
+        max: DASH_COOLDOWN,
+      },
+      {
+        key: "W",
+        name: UPGRADE_MAP[wId].name,
+        unlocked: wLv > 0,
+        ready: wLv > 0 && wCd <= 0,
+        cd: wCd,
+        max: wMax,
+      },
+      {
+        key: "E",
+        name: UPGRADE_MAP[eId].name,
+        unlocked: eLv > 0,
+        ready: eLv > 0 && eCd <= 0,
+        cd: eCd,
+        max: eMax,
+      },
+      {
+        key: "R",
+        name: ch.domainName.slice(0, 2),
+        unlocked: this.weps.domain > 0,
+        ready: this.weps.domain > 0 && this.domainCd <= 0,
+        cd: this.domainCd,
+        max: Math.max(10, 17 - this.weps.domain),
+      },
+    ];
   }
 
   togglePause() {
@@ -385,6 +454,8 @@ export class HordeSim {
     this.userPaused = !this.userPaused;
     this.paused = this.userPaused;
     this.wantDash = false;
+    this.wantSecondary = false;
+    this.wantBurst = false;
     this.wantPurple = false;
     this.wantDomain = false;
   }
@@ -433,6 +504,8 @@ export class HordeSim {
     if (this.over) return;
     if (this.paused) {
       this.wantDash = false;
+      this.wantSecondary = false;
+      this.wantBurst = false;
       this.wantPurple = false;
       this.wantDomain = false;
       return;
@@ -450,6 +523,9 @@ export class HordeSim {
     this.domainCd = Math.max(0, this.domainCd - step);
     this.dashCd = Math.max(0, this.dashCd - step);
     this.purpleCd = Math.max(0, this.purpleCd - step);
+    for (const k of Object.keys(this.cd)) {
+      this.cd[k] = Math.max(0, (this.cd[k] ?? 0) - step);
+    }
     if (this.regen > 0 && this.hp > 0) {
       this.hp = Math.min(this.maxHp, this.hp + this.regen * step);
       this.healAcc += step;
@@ -463,11 +539,12 @@ export class HordeSim {
     this.readMove();
     if (this.wantDash) this.castDash();
     this.wantDash = false;
-    if (this.wantPurple) this.castPurple();
+    if (this.wantSecondary) this.castW();
+    this.wantSecondary = false;
+    if (this.wantBurst || this.wantPurple) this.castE();
+    this.wantBurst = false;
     this.wantPurple = false;
-    if (this.weps.domain > 0 && this.domainCd <= 0 && this.wantDomain) {
-      this.castDomain();
-    }
+    if (this.wantDomain) this.castDomain();
     this.wantDomain = false;
 
     if (this.dashT > 0) {
@@ -512,24 +589,109 @@ export class HordeSim {
     else if (this.time >= CLEAR_TIME && !this.over) this.finish(true);
   }
 
+  setMoveTarget(x: number, y: number) {
+    this.hasMove = true;
+    this.tx = clamp(x, 40, WORLD - 40);
+    this.ty = clamp(y, 40, WORLD - 40);
+  }
+
+  setMoveFromScreen(sx: number, sy: number, w: number, h: number) {
+    this.setMoveTarget(this.camx - w / 2 + sx, this.camy - h / 2 + sy);
+  }
+
+  clearMove() {
+    this.hasMove = false;
+  }
+
+  readyCd(id: string, base: number) {
+    if ((this.cd[id] ?? 0) > 0) return false;
+    this.cd[id] = base;
+    return true;
+  }
+
   readMove() {
     const src = this.injected ?? this.keys;
-    let ax = this.injected ? 0 : this.stickX;
-    let ay = this.injected ? 0 : this.stickY;
-    if (src.has("KeyA") || src.has("ArrowLeft")) ax -= 1;
-    if (src.has("KeyD") || src.has("ArrowRight")) ax += 1;
-    if (src.has("KeyW") || src.has("ArrowUp")) ay -= 1;
-    if (src.has("KeyS") || src.has("ArrowDown")) ay += 1;
-    if (src.has("Space")) this.wantDomain = true;
-    if (src.has("ShiftLeft") || src.has("ShiftRight") || src.has("KeyF")) this.wantDash = true;
-    if (src.has("KeyE") || src.has("KeyQ")) this.wantPurple = true;
-    const m = Math.hypot(ax, ay);
-    if (m > 1) {
-      ax /= m;
-      ay /= m;
+    if (src.has("KeyQ")) this.wantDash = true;
+    if (src.has("KeyW")) this.wantSecondary = true;
+    if (src.has("KeyE")) this.wantBurst = true;
+    if (src.has("KeyR")) this.wantDomain = true;
+
+    let ax = 0;
+    let ay = 0;
+    if (src.has("ArrowLeft")) ax -= 1;
+    if (src.has("ArrowRight")) ax += 1;
+    if (src.has("ArrowUp")) ay -= 1;
+    if (src.has("ArrowDown")) ay += 1;
+    const keys = Math.hypot(ax, ay);
+    if (keys > 0.12) {
+      this.hasMove = false;
+      if (keys > 1) {
+        ax /= keys;
+        ay /= keys;
+      }
+      this.ax = ax;
+      this.ay = ay;
+      return;
     }
-    this.ax = ax;
-    this.ay = ay;
+
+    if (this.hasMove) {
+      const dx = this.tx - this.x;
+      const dy = this.ty - this.y;
+      const d = Math.hypot(dx, dy);
+      if (d <= ARRIVE) {
+        this.hasMove = false;
+        this.ax = 0;
+        this.ay = 0;
+        return;
+      }
+      this.ax = dx / d;
+      this.ay = dy / d;
+      return;
+    }
+
+    this.ax = 0;
+    this.ay = 0;
+  }
+
+  castW() {
+    if (this.charId === "gojo") this.volleyRed();
+    else this.volleyCleave();
+  }
+
+  castE() {
+    if (this.charId === "gojo") this.castPurple();
+    else this.volleyFlame();
+  }
+
+  volleyRed() {
+    const R = this.weps.red;
+    if (R < 1) return;
+    if (!this.readyCd("red", Math.max(0.65, 1.3 - R * 0.06))) return;
+    const n = 4 + R;
+    const size = 4 + R * 1.15;
+    for (let i = 0; i < n; i++) {
+      const spread = (i - (n - 1) / 2) * (0.16 - Math.min(0.06, R * 0.008));
+      const ang = this.facing + spread;
+      this.shot(1, this.x, this.y, Math.cos(ang) * 430, Math.sin(ang) * 430, 8 + R * 2.6, 0.55, 0, 0, size);
+    }
+    sfxSkill("red");
+  }
+
+  volleyCleave() {
+    const Cl = this.weps.cleave;
+    if (Cl < 1) return;
+    if (!this.readyCd("cleave", Math.max(0.7, 1.25 - Cl * 0.06))) return;
+    this.cleave(68 + Cl * 16, 0.85 + Cl * 0.1, 16 + Cl * 4);
+  }
+
+  volleyFlame() {
+    const F = this.weps.flame;
+    if (F < 1) return;
+    if (!this.readyCd("flame", Math.max(1.4, 2.6 - F * 0.14))) return;
+    const t = this.nearest(this.x, this.y);
+    const ang = t ? Math.atan2(t.y - this.y, t.x - this.x) : this.facing;
+    this.shot(5, this.x, this.y, Math.cos(ang) * 400, Math.sin(ang) * 400, 22 + F * 8, 0.9, 0, 0, 9 + F * 3.2);
+    sfxSkill("red");
   }
 
   spawn(dt: number) {
@@ -653,15 +815,7 @@ export class HordeSim {
       this.facing = Math.atan2(aim.y - this.y, aim.x - this.x);
     }
 
-    const tickCd = (id: string, base: number) => {
-      const cur = (this.cd[id] ?? 0) - dt;
-      if (cur > 0) {
-        this.cd[id] = cur;
-        return false;
-      }
-      this.cd[id] = base;
-      return true;
-    };
+    const tickCd = (id: string, base: number) => this.readyCd(id, base);
 
     const L = this.weps.limitless;
     if (L > 0 && tickCd("limitless", Math.max(0.36, 0.7 - L * 0.04))) {
@@ -682,17 +836,7 @@ export class HordeSim {
       sfxSkill("blue");
     }
 
-    const R = this.weps.red;
-    if (R > 0 && tickCd("red", Math.max(0.65, 1.3 - R * 0.06))) {
-      const n = 4 + R;
-      const size = 4 + R * 1.15;
-      for (let i = 0; i < n; i++) {
-        const spread = (i - (n - 1) / 2) * (0.16 - Math.min(0.06, R * 0.008));
-        const ang = this.facing + spread;
-        this.shot(1, this.x, this.y, Math.cos(ang) * 430, Math.sin(ang) * 430, 8 + R * 2.6, 0.55, 0, 0, size);
-      }
-      sfxSkill("red");
-    }
+    if (this.weps.red > 0) this.volleyRed();
 
     const C = this.weps.clone;
     if (C > 0) {
@@ -717,18 +861,9 @@ export class HordeSim {
       }
     }
 
-    const Cl = this.weps.cleave;
-    if (Cl > 0 && tickCd("cleave", Math.max(0.7, 1.25 - Cl * 0.06))) {
-      this.cleave(68 + Cl * 16, 0.85 + Cl * 0.1, 16 + Cl * 4);
-    }
+    if (this.weps.cleave > 0) this.volleyCleave();
 
-    const F = this.weps.flame;
-    if (F > 0 && tickCd("flame", Math.max(1.4, 2.6 - F * 0.14))) {
-      const t = aim ?? this.nearest(this.x, this.y);
-      const ang = t ? Math.atan2(t.y - this.y, t.x - this.x) : this.facing;
-      this.shot(5, this.x, this.y, Math.cos(ang) * 400, Math.sin(ang) * 400, 22 + F * 8, 0.9, 0, 0, 9 + F * 3.2);
-      sfxSkill("red");
-    }
+    if (this.weps.flame > 0) this.volleyFlame();
 
     const Bl = this.weps.blades;
     if (Bl > 0) {
@@ -955,6 +1090,10 @@ export class HordeSim {
     if (this.dashCd > 0 || this.dashT > 0) return;
     let nx = this.ax;
     let ny = this.ay;
+    if (this.hasMove && Math.hypot(this.tx - this.x, this.ty - this.y) > 4) {
+      nx = this.tx - this.x;
+      ny = this.ty - this.y;
+    }
     if (Math.hypot(nx, ny) < 0.12) {
       nx = Math.cos(this.facing);
       ny = Math.sin(this.facing);
@@ -1212,6 +1351,23 @@ export class HordeSim {
           ? `rgba(196,76,76,${0.08 + this.freeze * 0.08})`
           : `rgba(126,232,228,${0.08 + this.freeze * 0.08})`;
       ctx.fillRect(0, 0, w, h);
+    }
+
+    if (this.hasMove) {
+      const mx = this.tx - camx;
+      const my = this.ty - camy;
+      ctx.strokeStyle =
+        this.charId === "sukuna" ? "rgba(196,76,76,0.7)" : "rgba(126,232,228,0.7)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(mx, my, 8, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(mx - 5, my);
+      ctx.lineTo(mx + 5, my);
+      ctx.moveTo(mx, my - 5);
+      ctx.lineTo(mx, my + 5);
+      ctx.stroke();
     }
 
     if (this.weps.eyes + this.weps.sense > 0) {

@@ -35,7 +35,7 @@ export const CHARS: CharDef[] = [
     hitLine: "碰到了。无极呢？",
     kit: ["无极", "苍", "赫", "虚式"],
     dashName: "瞬移",
-    dashHint: "无下限踏步，穿过秽物。",
+    dashHint: "Q。无下限踏步，穿过秽物。",
   },
   {
     id: "sukuna",
@@ -52,7 +52,7 @@ export const CHARS: CharDef[] = [
     hitLine: "被摸到了。开。",
     kit: ["解", "捌", "开", "厨子"],
     dashName: "瞬斩",
-    dashHint: "踏过去，沿路切开。",
+    dashHint: "Q。踏过去，沿路切开。",
     unlockHint: "先活一场。",
   },
 ];
