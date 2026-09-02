@@ -82,6 +82,29 @@ describe("HordeSim", () => {
     assert.ok(sim.domainCd > 0);
   });
 
+  it("maps Sukuna QWER to 瞬斩, 捌, 开, 术域", () => {
+    const sim = new HordeSim("sukuna");
+    const slots = sim.hud().skills;
+    assert.deepEqual(
+      slots.map((s) => s.name),
+      ["瞬斩", "捌", "开", "伏魔"],
+    );
+    assert.equal(slots.find((s) => s.key === "Q")?.unlocked, true);
+    assert.equal(slots.find((s) => s.key === "W")?.unlocked, false);
+
+    sim.weps.cleave = 1;
+    sim.castW();
+    assert.ok((sim.cd.cleave ?? 0) > 0);
+
+    sim.weps.flame = 1;
+    sim.castE();
+    assert.ok(sim.bullets.some((b) => b.alive && b.kind === 5));
+
+    sim.weps.domain = 1;
+    sim.castDomain();
+    assert.equal(sim.usedDomain, true);
+  });
+
   it("does not dash on Shift or domain on Space", () => {
     const sim = new HordeSim("gojo");
     sim.weps.domain = 1;
