@@ -1,4 +1,4 @@
-import type { CharId } from "./characters";
+import type { CharId } from "./characters.ts";
 
 export type UpgradeId =
   | "limitless"
@@ -163,4 +163,45 @@ export function emptyWeps(): Record<UpgradeId, number> {
 
 export function poolFor(char: CharId) {
   return UPGRADES.filter((u) => u.who === "all" || u.who.includes(char));
+}
+
+/** Mid-run spotlight so a decent game actually sees 虚式 / 术域. */
+export function spotlightId(
+  char: CharId,
+  weps: Record<UpgradeId, number>,
+  time: number,
+  level: number,
+): UpgradeId | null {
+  const owned = (id: UpgradeId) => (weps[id] ?? 0) > 0;
+  if (char === "gojo" && !owned("blue") && level >= 2) return "blue";
+  if (char === "sukuna" && !owned("cleave") && level >= 2) return "cleave";
+  if (char === "gojo" && !owned("purple") && (level >= 4 || time >= 42)) return "purple";
+  if (char === "sukuna" && !owned("flame") && (level >= 4 || time >= 48)) return "flame";
+  if (!owned("domain") && (level >= 6 || time >= 75)) return "domain";
+  if (char === "gojo" && !owned("red") && (level >= 5 || time >= 60)) return "red";
+  if (char === "sukuna" && !owned("blades") && level >= 5) return "blades";
+  return null;
+}
+
+export function rollPicks(
+  char: CharId,
+  weps: Record<UpgradeId, number>,
+  time: number,
+  level: number,
+  rng: () => number = Math.random,
+): UpgradeDef[] {
+  const pool = poolFor(char).filter((u) => (weps[u.id] ?? 0) < u.max);
+  if (pool.length === 0) return [];
+  const picks: UpgradeDef[] = [];
+  const bag = [...pool];
+  const spot = spotlightId(char, weps, time, level);
+  if (spot) {
+    const i = bag.findIndex((u) => u.id === spot);
+    if (i >= 0) picks.push(bag.splice(i, 1)[0]!);
+  }
+  while (picks.length < 3 && bag.length) {
+    const i = Math.floor(rng() * bag.length);
+    picks.push(bag.splice(i, 1)[0]!);
+  }
+  return picks;
 }

@@ -150,4 +150,24 @@ export function sfxLevel() {
   tone(780, 0.18, "triangle", 0.05, 1040);
 }
 
+export function sfxDash(kind: "gojo" | "sukuna") {
+  if (kind === "gojo") {
+    tone(880, 0.09, "sine", 0.08, 220);
+    noise(0.06, 0.05, 700);
+  } else {
+    noise(0.1, 0.12, 280);
+    tone(170, 0.12, "sawtooth", 0.1, 64);
+  }
+}
+
+export function sfxOver(won: boolean) {
+  if (won) {
+    tone(320, 0.28, "sine", 0.1, 640);
+    tone(480, 0.4, "triangle", 0.07, 960);
+  } else {
+    tone(140, 0.42, "sawtooth", 0.1, 48);
+    noise(0.2, 0.08, 120);
+  }
+}
+
 export { ac };

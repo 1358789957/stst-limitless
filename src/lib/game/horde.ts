@@ -1,9 +1,25 @@
-import type { Atlas } from "./atlas";
-import { sfxCrit, sfxDomain, sfxHit, sfxHurt, sfxKill, sfxLevel, sfxSkill } from "./audio";
-import { CHAR_MAP, type CharId } from "./characters";
-import { emptyWeps, poolFor, UPGRADE_MAP, type UpgradeDef, type UpgradeId } from "./upgrades";
+import type { Atlas } from "./atlas.ts";
+import {
+  sfxCrit,
+  sfxDash,
+  sfxDomain,
+  sfxHit,
+  sfxHurt,
+  sfxKill,
+  sfxLevel,
+  sfxOver,
+  sfxSkill,
+} from "./audio.ts";
+import { CHAR_MAP, type CharId } from "./characters.ts";
+import { emptyWeps, rollPicks, UPGRADE_MAP, type UpgradeDef, type UpgradeId } from "./upgrades.ts";
 
 export const WORLD = 2200;
+export const CLEAR_TIME = 180;
+export const DASH_COOLDOWN = 2.15;
+export const EXTRA_START: Record<CharId, UpgradeId> = {
+  gojo: "blue",
+  sukuna: "cleave",
+};
 
 const MAX_E = 200;
 const MAX_B = 280;
@@ -27,6 +43,7 @@ type Enemy = {
   spd: number;
   hurt: number;
   seed: number;
+  elite: boolean;
 };
 
 type Bullet = {
@@ -91,20 +108,30 @@ export type HudSnap = {
   need: number;
   level: number;
   time: number;
+  clearTime: number;
   kills: number;
   wave: number;
   paused: boolean;
+  userPaused: boolean;
   over: boolean;
+  won: boolean;
   picks: UpgradeDef[] | null;
   weps: { id: UpgradeId; lv: number }[];
   domainCd: number;
+  domainMax: number;
   domainReady: boolean;
   dashCd: number;
+  dashMax: number;
   dashReady: boolean;
   purpleCd: number;
+  purpleMax: number;
   purpleReady: boolean;
   line: string;
   charId: CharId;
+};
+
+export type HordeOpts = {
+  extraStart?: boolean;
 };
 
 export class HordeSim {
@@ -143,8 +170,14 @@ export class HordeSim {
   anim = 0;
   freeze = 0;
   paused = false;
+  userPaused = false;
   over = false;
+  won = false;
   recorded = false;
+  extraStart = false;
+  usedDomain = false;
+  sawBoss = false;
+  shake = 0;
   line = "吾乃最强。";
   weps: Record<UpgradeId, number> = emptyWeps();
   cd: Record<string, number> = {};
@@ -162,6 +195,8 @@ export class HordeSim {
   camy = WORLD / 2;
   spawnAcc = 0;
   nextBoss = 55;
+  nextChamp = 32;
+  nextBlood = 78;
   hitstop = 0;
   healAcc = 0;
   trail: { x: number; y: number; flip: boolean }[] = [];
@@ -176,12 +211,13 @@ export class HordeSim {
   gi = 0;
   fi = 0;
 
-  constructor(charId: CharId = "gojo") {
-    this.reset(charId);
+  constructor(charId: CharId = "gojo", opts?: HordeOpts) {
+    this.reset(charId, opts);
   }
 
-  reset(charId?: CharId) {
+  reset(charId?: CharId, opts?: HordeOpts) {
     if (charId) this.charId = charId;
+    if (opts?.extraStart != null) this.extraStart = opts.extraStart;
     const ch = CHAR_MAP[this.charId];
     this.x = WORLD / 2;
     this.y = WORLD / 2;
@@ -205,11 +241,17 @@ export class HordeSim {
     this.anim = 0;
     this.freeze = 0;
     this.paused = false;
+    this.userPaused = false;
     this.over = false;
+    this.won = false;
     this.recorded = false;
+    this.usedDomain = false;
+    this.sawBoss = false;
+    this.shake = 0;
     this.line = ch.line;
     this.weps = emptyWeps();
     this.weps[ch.start as UpgradeId] = 1;
+    if (this.extraStart) this.weps[EXTRA_START[this.charId]] = 1;
     this.cd = {};
     this.domainCd = 0;
     this.dashCd = 0;
@@ -220,6 +262,8 @@ export class HordeSim {
     this.camy = this.y;
     this.spawnAcc = 0;
     this.nextBoss = 55;
+    this.nextChamp = 32;
+    this.nextBlood = 78;
     this.hitstop = 0;
     this.healAcc = 0;
     this.trail = [];
@@ -253,6 +297,7 @@ export class HordeSim {
       spd: 40,
       hurt: 0,
       seed: Math.random(),
+      elite: false,
     };
   }
   emptyB(): Bullet {
@@ -303,6 +348,8 @@ export class HordeSim {
     const weps = (Object.keys(this.weps) as UpgradeId[])
       .filter((id) => this.weps[id] > 0)
       .map((id) => ({ id, lv: this.weps[id] }));
+    const P = this.weps.purple;
+    const D = this.weps.domain;
     return {
       hp: this.hp,
       maxHp: this.maxHp,
@@ -310,21 +357,36 @@ export class HordeSim {
       need: this.need,
       level: this.lv,
       time: this.time,
+      clearTime: CLEAR_TIME,
       kills: this.kills,
       wave: 1 + Math.floor(this.time / 20),
       paused: this.paused,
+      userPaused: this.userPaused,
       over: this.over,
+      won: this.won,
       picks: this.picks,
       weps,
       domainCd: this.domainCd,
-      domainReady: this.weps.domain > 0 && this.domainCd <= 0,
+      domainMax: Math.max(10, 17 - D),
+      domainReady: D > 0 && this.domainCd <= 0,
       dashCd: this.dashCd,
+      dashMax: DASH_COOLDOWN,
       dashReady: this.dashCd <= 0 && this.dashT <= 0,
       purpleCd: this.purpleCd,
-      purpleReady: this.weps.purple > 0 && this.purpleCd <= 0,
+      purpleMax: Math.max(2, 4 - P * 0.28),
+      purpleReady: P > 0 && this.purpleCd <= 0,
       line: this.line,
       charId: this.charId,
     };
+  }
+
+  togglePause() {
+    if (this.over || this.picks) return;
+    this.userPaused = !this.userPaused;
+    this.paused = this.userPaused;
+    this.wantDash = false;
+    this.wantPurple = false;
+    this.wantDomain = false;
   }
 
   choose(id: UpgradeId) {
@@ -335,7 +397,7 @@ export class HordeSim {
     this.weps[id] = Math.min(def.max, lv);
     this.applyStats();
     this.picks = null;
-    this.paused = false;
+    this.paused = this.userPaused;
     this.line = `${def.name}。`;
     sfxLevel();
   }
@@ -354,12 +416,29 @@ export class HordeSim {
     this.speed = 200 * (1 + s * 0.2);
   }
 
+  finish(won: boolean) {
+    if (this.over) return;
+    this.over = true;
+    this.won = won;
+    this.hp = won ? this.hp : 0;
+    this.paused = false;
+    this.userPaused = false;
+    this.picks = null;
+    this.line = won ? "时间到。还站着。" : "……就这？不，再来。";
+    sfxOver(won);
+  }
+
   tick(dt: number) {
     if (this.over) return;
     if (this.paused) {
       this.wantDash = false;
       this.wantPurple = false;
       this.wantDomain = false;
+      return;
+    }
+    if (this.hitstop > 0) {
+      this.hitstop = Math.max(0, this.hitstop - dt);
+      this.fxStep(Math.min(dt, 0.05));
       return;
     }
     const step = Math.min(dt, 0.05);
@@ -426,12 +505,10 @@ export class HordeSim {
     this.gemsStep(step);
     this.fxStep(step);
     this.contact();
+    this.shake = Math.max(0, this.shake - step * 28);
 
-    if (this.hp <= 0 && !this.over) {
-      this.hp = 0;
-      this.over = true;
-      this.line = "……就这？不，再来。";
-    }
+    if (this.hp <= 0 && !this.over) this.finish(false);
+    else if (this.time >= CLEAR_TIME && !this.over) this.finish(true);
   }
 
   readMove() {
@@ -456,25 +533,38 @@ export class HordeSim {
 
   spawn(dt: number) {
     const t = this.time;
-    const rate = 4.4 + t * 0.16;
+    const late = t > 90 ? (t - 90) * 0.05 : 0;
+    const rate = 2.35 + t * 0.085 + late;
     this.spawnAcc += dt * rate;
     while (this.spawnAcc >= 1) {
       this.spawnAcc -= 1;
       let kind: Kind = 0;
       const roll = Math.random();
-      if (t > 70 && roll < 0.12) kind = 2;
-      else if (t > 28 && roll < 0.38) kind = 1;
-      else if (t > 50 && roll < 0.22) kind = 2;
-      this.birth(kind);
+      if (t > 70 && roll < 0.14) kind = 2;
+      else if (t > 24 && roll < 0.36) kind = 1;
+      else if (t > 48 && roll < 0.2) kind = 2;
+      this.birth(kind, { near: t > 18 && Math.random() < 0.45 });
+    }
+    if (t >= this.nextChamp) {
+      this.birth(1, { elite: true, near: true });
+      this.nextChamp += 46;
+      this.line = "众口。别被围住。";
+    }
+    if (t >= this.nextBlood) {
+      this.birth(2, { elite: true, near: true });
+      this.nextBlood += 52;
+      this.line = "血涂。屠宰场自己站起来了。";
     }
     if (t >= this.nextBoss) {
-      this.birth(3);
+      this.birth(3, { near: true });
       this.nextBoss += 48;
+      this.sawBoss = true;
+      this.shake = Math.max(this.shake, 12);
       this.line = "灾核。别眨眼。";
     }
   }
 
-  birth(kind: Kind) {
+  birth(kind: Kind, opts?: { elite?: boolean; near?: boolean }) {
     let e: Enemy | null = null;
     for (let i = 0; i < MAX_E; i++) {
       const idx = (this.ei + i) % MAX_E;
@@ -486,36 +576,45 @@ export class HordeSim {
     }
     if (!e) return;
     const k = KINDS[kind]!;
-    const side = Math.floor(Math.random() * 4);
-    const margin = 30;
     let x = 0;
     let y = 0;
-    if (side === 0) {
-      x = rand(0, WORLD);
-      y = -margin;
-    } else if (side === 1) {
-      x = WORLD + margin;
-      y = rand(0, WORLD);
-    } else if (side === 2) {
-      x = rand(0, WORLD);
-      y = WORLD + margin;
+    if (opts?.near) {
+      const a = Math.random() * Math.PI * 2;
+      const dist = rand(380, 620);
+      x = clamp(this.x + Math.cos(a) * dist, 20, WORLD - 20);
+      y = clamp(this.y + Math.sin(a) * dist, 20, WORLD - 20);
     } else {
-      x = -margin;
-      y = rand(0, WORLD);
+      const side = Math.floor(Math.random() * 4);
+      const margin = 30;
+      if (side === 0) {
+        x = rand(0, WORLD);
+        y = -margin;
+      } else if (side === 1) {
+        x = WORLD + margin;
+        y = rand(0, WORLD);
+      } else if (side === 2) {
+        x = rand(0, WORLD);
+        y = WORLD + margin;
+      } else {
+        x = -margin;
+        y = rand(0, WORLD);
+      }
     }
-    const scale = 1 + this.time / 90;
+    const scale = 1 + this.time / 100;
+    const elite = Boolean(opts?.elite) || kind === 3;
     e.alive = true;
     e.kind = kind;
     e.x = x;
     e.y = y;
-    e.r = k.r;
-    e.max = k.hp * scale;
+    e.r = k.r * (elite && kind !== 3 ? 1.35 : 1);
+    e.max = k.hp * scale * (elite && kind !== 3 ? 3.4 : 1);
     e.hp = e.max;
-    e.dmg = k.dmg;
-    e.xp = k.xp;
-    e.spd = k.spd;
+    e.dmg = k.dmg * (elite ? 1.25 : 1);
+    e.xp = k.xp * (elite && kind !== 3 ? 4 : 1);
+    e.spd = k.spd * (elite && kind !== 3 ? 0.92 : 1);
     e.hurt = 0;
     e.seed = Math.random();
+    e.elite = elite;
   }
 
   moveEnemies(dt: number) {
@@ -800,12 +899,14 @@ export class HordeSim {
         });
       }
     }
+    if (crit && fl > 0) this.hitstop = Math.max(this.hitstop, 0.045);
     if (e.hp <= 0) {
       e.alive = false;
       this.kills += 1;
       this.drop(e.x, e.y, e.xp);
       this.pushFx(e.x, e.y, e.r * 2.2, 0.28, 4, "", false);
-      if (crit && fl > 0) this.bloodSpray(e.x, e.y);
+      this.bloodSpray(e.x, e.y);
+      if (e.kind === 3) this.shake = Math.max(this.shake, 10);
       if (this.kills % 8 === 0) sfxKill();
       else sfxHit();
     }
@@ -870,9 +971,11 @@ export class HordeSim {
     this.yaw = Math.atan2(-nx, -ny);
     this.dashT = 0.001;
     this.dashDur = this.charId === "gojo" ? 0.09 : 0.14;
-    this.dashCd = 2.15;
-    this.invuln = Math.max(this.invuln, 0.4);
+    this.dashCd = DASH_COOLDOWN;
+    this.invuln = Math.max(this.invuln, 0.42);
     this.line = this.charId === "gojo" ? "无下限。踏。" : "解。踏过去。";
+    this.pushFx(this.x, this.y, 40, 0.18, this.charId === "gojo" ? 1 : 9, "", false, this.facing);
+    sfxDash(this.charId === "sukuna" ? "sukuna" : "gojo");
   }
 
   stepDash(dt: number) {
@@ -906,9 +1009,24 @@ export class HordeSim {
     if (P < 1 || this.purpleCd > 0) return;
     const t = this.nearest(this.x, this.y);
     const ang = t ? Math.atan2(t.y - this.y, t.x - this.x) : this.facing;
-    const size = 10 + P * 3.6;
-    this.shot(2, this.x, this.y, Math.cos(ang) * 660, Math.sin(ang) * 660, 36 + P * 12, 0.7, 12, 0, size);
+    const size = 12 + P * 4.2;
+    const vx = Math.cos(ang) * 720;
+    const vy = Math.sin(ang) * 720;
+    this.shot(2, this.x, this.y, vx, vy, 40 + P * 14, 0.78, 14, 0, size);
+    for (let i = 1; i <= 3; i++) {
+      this.pushFx(
+        this.x + Math.cos(ang) * (36 * i),
+        this.y + Math.sin(ang) * (36 * i),
+        16 + P * 3,
+        0.16,
+        12,
+        "",
+        false,
+        ang,
+      );
+    }
     this.purpleCd = Math.max(2.0, 4.0 - P * 0.28);
+    this.shake = Math.max(this.shake, 7);
     this.line = "苍。赫。虚式。";
     sfxSkill("purple");
   }
@@ -957,17 +1075,11 @@ export class HordeSim {
   }
 
   offer() {
-    const pool = poolFor(this.charId).filter((u) => this.weps[u.id] < u.max);
-    if (pool.length === 0) {
+    const picks = rollPicks(this.charId, this.weps, this.time, this.lv);
+    if (picks.length === 0) {
       this.hp = Math.min(this.maxHp, this.hp + 24);
       this.line = "已经满了。多活一会儿。";
       return;
-    }
-    const picks: UpgradeDef[] = [];
-    const bag = [...pool];
-    while (picks.length < 3 && bag.length) {
-      const i = Math.floor(Math.random() * bag.length);
-      picks.push(bag.splice(i, 1)[0]!);
     }
     this.picks = picks;
     this.paused = true;
@@ -982,11 +1094,12 @@ export class HordeSim {
       const d = Math.hypot(e.x - this.x, e.y - this.y);
       if (d < e.r + this.r - 2) {
         this.hp -= e.dmg;
-        this.invuln = 0.62;
+        this.invuln = 0.7;
         const nx = (this.x - e.x) / (d || 1);
         const ny = (this.y - e.y) / (d || 1);
         this.x += nx * 28;
         this.y += ny * 28;
+        this.shake = Math.max(this.shake, 8);
         sfxHurt();
         this.line = CHAR_MAP[this.charId].hitLine;
         break;
@@ -998,7 +1111,11 @@ export class HordeSim {
     if (this.weps.domain < 1 || this.domainCd > 0) return;
     const lv = this.weps.domain;
     this.domainCd = Math.max(10, 17 - lv);
-    this.freeze = 1.15 + lv * 0.15;
+    this.freeze = 1.2 + lv * 0.18;
+    this.usedDomain = true;
+    this.shake = Math.max(this.shake, 14);
+    this.invuln = Math.max(this.invuln, 0.55);
+    this.pushFx(this.x, this.y, 240 + lv * 20, 0.55, this.charId === "sukuna" ? 3 : 1, "", false);
     if (this.charId === "sukuna") {
       this.ring(200 + lv * 24, 70 + lv * 26, 3);
       for (let i = 0; i < 10 + lv * 3; i++) {
@@ -1060,8 +1177,10 @@ export class HordeSim {
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number) {
     const atlas = this.atlas;
-    const camx = this.camx - w / 2;
-    const camy = this.camy - h / 2;
+    const jx = this.shake > 0 ? (Math.random() - 0.5) * this.shake : 0;
+    const jy = this.shake > 0 ? (Math.random() - 0.5) * this.shake : 0;
+    const camx = this.camx - w / 2 + jx;
+    const camy = this.camy - h / 2 + jy;
 
     ctx.fillStyle = "#08080c";
     ctx.fillRect(0, 0, w, h);
@@ -1142,16 +1261,28 @@ export class HordeSim {
         ctx.strokeStyle = "rgba(239,232,216,0.7)";
         ctx.lineWidth = 2;
         ctx.stroke();
+      } else if (b.kind === 2) {
+        const ang = Math.atan2(b.vy, b.vx);
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.rotate(ang);
+        const grd = ctx.createLinearGradient(-b.r * 9, 0, b.r * 2.4, 0);
+        grd.addColorStop(0, "rgba(126,232,228,0)");
+        grd.addColorStop(0.45, "rgba(168,132,255,0.78)");
+        grd.addColorStop(1, "rgba(239,232,216,0.95)");
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, b.r * 6.4, b.r * 0.72, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(126,232,228,0.85)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
       } else {
         ctx.fillStyle = b.kind === 1 ? "#c44c4c" : "#efe8d8";
         ctx.beginPath();
         ctx.arc(bx, by, b.r, 0, Math.PI * 2);
         ctx.fill();
-        if (b.kind === 2) {
-          ctx.strokeStyle = "rgba(126,232,228,0.75)";
-          ctx.lineWidth = 3;
-          ctx.stroke();
-        }
       }
     }
 
@@ -1202,10 +1333,17 @@ export class HordeSim {
           ctx.beginPath();
           ctx.ellipse(ex, ey + 6, e.r * 0.9, e.r * 0.35, 0, 0, Math.PI * 2);
           ctx.fill();
+          if (e.elite) {
+            ctx.strokeStyle = e.kind === 3 ? "rgba(196,76,76,0.7)" : "rgba(196,76,76,0.45)";
+            ctx.lineWidth = e.kind === 3 ? 3 : 2;
+            ctx.beginPath();
+            ctx.ellipse(ex, ey + 8, e.r * 1.15, e.r * 0.42, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
           if (atlas) {
             const sheet = atlas[k.sprite];
             const fr = sheet[Math.floor(this.anim * 8 + e.seed * 4) % 4]!;
-            const hgt = k.h;
+            const hgt = k.h * (e.elite && e.kind !== 3 ? 1.28 : 1);
             const wid = hgt * (fr.width / fr.height);
             ctx.save();
             if (e.hurt > 0) ctx.globalAlpha = 0.55;
@@ -1219,11 +1357,12 @@ export class HordeSim {
             }
             ctx.restore();
           }
-          if (e.kind === 3 || e.hp < e.max) {
+          if (e.kind === 3 || e.elite || e.hp < e.max) {
+            const bw = e.kind === 3 ? 44 : 32;
             ctx.fillStyle = "rgba(8,8,12,0.7)";
-            ctx.fillRect(ex - 16, ey + 10, 32, 3);
-            ctx.fillStyle = e.kind === 3 ? "#c44c4c" : "#7ee8e4";
-            ctx.fillRect(ex - 16, ey + 10, 32 * clamp(e.hp / e.max, 0, 1), 3);
+            ctx.fillRect(ex - bw / 2, ey + 10, bw, 3);
+            ctx.fillStyle = e.elite ? "#c44c4c" : "#7ee8e4";
+            ctx.fillRect(ex - bw / 2, ey + 10, bw * clamp(e.hp / e.max, 0, 1), 3);
           }
         },
       });
@@ -1346,6 +1485,23 @@ export class HordeSim {
         ctx.beginPath();
         ctx.arc(fx, fy, 3 + (1 - a) * 4, 0, Math.PI * 2);
         ctx.fill();
+      } else if (f.kind === 12) {
+        ctx.save();
+        ctx.translate(fx, fy);
+        ctx.rotate(f.ang);
+        ctx.strokeStyle = `rgba(180,140,255,${0.75 * a})`;
+        ctx.lineWidth = 5 + (1 - a) * 6;
+        ctx.beginPath();
+        ctx.moveTo(-f.r * 1.6, 0);
+        ctx.lineTo(f.r * 1.8, 0);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(239,232,216,${0.85 * a})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-f.r, 0);
+        ctx.lineTo(f.r * 2.2, 0);
+        ctx.stroke();
+        ctx.restore();
       } else if (f.kind === 2 && f.text) {
         ctx.font = f.crit ? "700 16px IBM Plex Mono, monospace" : "500 12px IBM Plex Mono, monospace";
         ctx.fillStyle = f.crit ? "#efe8d8" : "#7ee8e4";

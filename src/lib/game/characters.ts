@@ -16,6 +16,7 @@ export type CharDef = {
   kit: string[];
   dashName: string;
   dashHint: string;
+  unlockHint?: string;
 };
 
 export const CHARS: CharDef[] = [
@@ -52,6 +53,7 @@ export const CHARS: CharDef[] = [
     kit: ["解", "捌", "开", "厨子"],
     dashName: "瞬斩",
     dashHint: "踏过去，沿路切开。",
+    unlockHint: "先活一场。",
   },
 ];
 
