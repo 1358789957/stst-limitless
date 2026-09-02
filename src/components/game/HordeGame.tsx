@@ -16,6 +16,7 @@ function SkillButton({
   unlocked,
   cd,
   max,
+  rank,
   onClick,
   accent,
 }: {
@@ -25,6 +26,7 @@ function SkillButton({
   unlocked: boolean;
   cd: number;
   max: number;
+  rank: number;
   onClick: () => void;
   accent: "ice" | "blood" | "paper";
 }) {
@@ -49,7 +51,10 @@ function SkillButton({
         }}
       />
       <span className="relative z-10 flex flex-col items-center leading-none">
-        <span className="text-[10px] tracking-wider text-mute">{slotKey}</span>
+        <span className="text-[10px] tracking-wider text-mute">
+          {slotKey}
+          {unlocked && rank > 0 ? `·${rank}` : ""}
+        </span>
         <span className="mt-0.5">{!unlocked ? "—" : ready ? label : Math.ceil(cd)}</span>
       </span>
     </button>
@@ -358,15 +363,13 @@ export function HordeGame({
             </button>
           </div>
         </div>
-        {hud.weps.filter((w) => w.id !== "limitless" && w.id !== "slash").length > 0 && (
+        {hud.weps.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {hud.weps
-              .filter((w) => w.id !== "limitless" && w.id !== "slash")
-              .map((w) => (
-                <span key={w.id} className="rounded-sm bg-ink-2/90 px-2 py-0.5 text-[11px] text-mute">
-                  {UPGRADE_MAP[w.id]?.name ?? w.id} {w.lv}
-                </span>
-              ))}
+            {hud.weps.map((w) => (
+              <span key={w.id} className="rounded-sm bg-ink-2/90 px-2 py-0.5 text-[11px] text-mute">
+                {UPGRADE_MAP[w.id]?.name ?? w.id} {w.lv}
+              </span>
+            ))}
           </div>
         )}
       </header>
@@ -384,6 +387,7 @@ export function HordeGame({
               unlocked={s.unlocked}
               cd={s.cd}
               max={s.max}
+              rank={s.rank}
               accent={s.key === "Q" ? "paper" : ice ? "ice" : "blood"}
               onClick={() => {
                 unlockAudio();
@@ -404,13 +408,12 @@ export function HordeGame({
         <div className="absolute inset-0 z-30 flex items-end justify-center bg-ink/70 p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:items-center">
           <div className="w-full max-w-lg">
             <p className="mb-1 font-display text-xl text-paper">升级 · 选一条术式</p>
-            <p className="mb-3 text-xs text-mute">秽物会等。选完再割。</p>
+            <p className="mb-3 text-xs text-mute">秽物会等。选完再割。新术开路，进化收束。</p>
             <div className="grid gap-2 sm:grid-cols-3">
               {hud.picks.map((p) => {
-                const cur = simRef.current.weps[p.id] ?? 0;
                 return (
                   <button
-                    key={p.id}
+                    key={`${p.tag}-${p.id}`}
                     type="button"
                     onClick={() => {
                       unlockAudio();
@@ -419,11 +422,12 @@ export function HordeGame({
                     }}
                     className="rounded-lg border border-line bg-ink-2 p-4 text-left"
                   >
-                    <p className="text-sm text-paper">{p.name}</p>
+                    <p className="text-[10px] tracking-[0.2em] text-ice">{p.tag}</p>
+                    <p className="mt-1 text-sm text-paper">{p.name}</p>
                     <p className="mt-1 text-xs tracking-[0.18em] text-ice">{p.kana}</p>
-                    <p className="mt-2 text-xs leading-relaxed text-mute">{p.desc(cur + 1)}</p>
+                    <p className="mt-2 text-xs leading-relaxed text-mute">{p.desc}</p>
                     <p className="mt-3 text-xs text-mute">
-                      Lv. {cur} → {cur + 1}
+                      {p.from <= 0 ? "解锁" : "进化"} · {p.from} → {p.to}
                     </p>
                   </button>
                 );

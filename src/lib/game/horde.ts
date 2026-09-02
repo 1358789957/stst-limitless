@@ -11,7 +11,7 @@ import {
   sfxSkill,
 } from "./audio.ts";
 import { CHAR_MAP, type CharId } from "./characters.ts";
-import { emptyWeps, rollPicks, UPGRADE_MAP, type UpgradeDef, type UpgradeId } from "./upgrades.ts";
+import { emptyWeps, rollPicks, UPGRADE_MAP, type Offer, type UpgradeId } from "./upgrades.ts";
 
 export const WORLD = 2200;
 export const CLEAR_TIME = 180;
@@ -83,7 +83,39 @@ const KINDS = [
 ];
 
 function xpNeed(level: number) {
-  return Math.floor(8 * Math.pow(1.27, level));
+  if (level < 5) return 7 + level * 3;
+  return Math.floor(20 * Math.pow(1.24, level - 5));
+}
+
+function orbitCount(lv: number) {
+  if (lv <= 0) return 0;
+  if (lv >= 4) return 4;
+  if (lv >= 2) return 3;
+  return 2;
+}
+
+function orbitDist(lv: number, base: number) {
+  return base + (lv >= 3 ? 22 : lv * 6);
+}
+
+function purpleCdFor(p: number) {
+  return [0, 5.6, 4.9, 4.4, 3.8][Math.min(4, Math.max(0, p))] ?? 5.6;
+}
+
+function domainCdFor(d: number) {
+  return [0, 22, 18, 15][Math.min(3, Math.max(0, d))] ?? 22;
+}
+
+function redCdFor(r: number) {
+  return [0, 1.15, 1.0, 0.88, 0.78][Math.min(4, Math.max(0, r))] ?? 1.15;
+}
+
+function cleaveCdFor(c: number) {
+  return [0, 1.2, 1.05, 0.95, 0.85][Math.min(4, Math.max(0, c))] ?? 1.2;
+}
+
+function flameCdFor(f: number) {
+  return [0, 3.1, 2.8, 2.5, 2.2][Math.min(4, Math.max(0, f))] ?? 3.1;
 }
 
 function clamp(v: number, a: number, b: number) {
@@ -116,7 +148,7 @@ export type HudSnap = {
   userPaused: boolean;
   over: boolean;
   won: boolean;
-  picks: UpgradeDef[] | null;
+  picks: Offer[] | null;
   weps: { id: UpgradeId; lv: number }[];
   domainCd: number;
   domainMax: number;
@@ -139,6 +171,7 @@ export type SkillSlot = {
   unlocked: boolean;
   cd: number;
   max: number;
+  rank: number;
 };
 
 export type HordeOpts = {
@@ -206,13 +239,14 @@ export class HordeSim {
   dy0 = 0;
   dx1 = 0;
   dy1 = 0;
-  picks: UpgradeDef[] | null = null;
+  picks: Offer[] | null = null;
+  lastPick: UpgradeId | null = null;
   camx = WORLD / 2;
   camy = WORLD / 2;
   spawnAcc = 0;
-  nextBoss = 55;
-  nextChamp = 32;
-  nextBlood = 78;
+  nextBoss = 108;
+  nextChamp = 28;
+  nextBlood = 70;
   hitstop = 0;
   healAcc = 0;
   trail: { x: number; y: number; flip: boolean }[] = [];
@@ -274,12 +308,13 @@ export class HordeSim {
     this.purpleCd = 0;
     this.dashT = 0;
     this.picks = null;
+    this.lastPick = null;
     this.camx = this.x;
     this.camy = this.y;
     this.spawnAcc = 0;
-    this.nextBoss = 55;
-    this.nextChamp = 32;
-    this.nextBlood = 78;
+    this.nextBoss = 108;
+    this.nextChamp = 28;
+    this.nextBlood = 70;
     this.hitstop = 0;
     this.healAcc = 0;
     this.trail = [];
@@ -388,13 +423,13 @@ export class HordeSim {
       picks: this.picks,
       weps,
       domainCd: this.domainCd,
-      domainMax: Math.max(10, 17 - D),
+      domainMax: domainCdFor(D),
       domainReady: D > 0 && this.domainCd <= 0,
       dashCd: this.dashCd,
       dashMax: DASH_COOLDOWN,
       dashReady: this.dashCd <= 0 && this.dashT <= 0,
       purpleCd: this.purpleCd,
-      purpleMax: Math.max(2, 4 - P * 0.28),
+      purpleMax: purpleCdFor(P),
       purpleReady: P > 0 && this.purpleCd <= 0,
       line: this.line,
       charId: this.charId,
@@ -408,8 +443,8 @@ export class HordeSim {
     const eId: UpgradeId = gojo ? "purple" : "flame";
     const wLv = this.weps[wId];
     const eLv = this.weps[eId];
-    const wMax = gojo ? Math.max(0.65, 1.3 - wLv * 0.06) : Math.max(0.7, 1.25 - wLv * 0.06);
-    const eMax = gojo ? Math.max(2, 4 - eLv * 0.28) : Math.max(1.4, 2.6 - eLv * 0.14);
+    const wMax = gojo ? redCdFor(wLv) : cleaveCdFor(wLv);
+    const eMax = gojo ? purpleCdFor(eLv) : flameCdFor(eLv);
     const wCd = this.cd[wId] ?? 0;
     const eCd = gojo ? this.purpleCd : (this.cd.flame ?? 0);
     const ch = CHAR_MAP[this.charId];
@@ -421,6 +456,7 @@ export class HordeSim {
         ready: this.dashCd <= 0 && this.dashT <= 0,
         cd: this.dashCd,
         max: DASH_COOLDOWN,
+        rank: 0,
       },
       {
         key: "W",
@@ -429,6 +465,7 @@ export class HordeSim {
         ready: wLv > 0 && wCd <= 0,
         cd: wCd,
         max: wMax,
+        rank: wLv,
       },
       {
         key: "E",
@@ -437,6 +474,7 @@ export class HordeSim {
         ready: eLv > 0 && eCd <= 0,
         cd: eCd,
         max: eMax,
+        rank: eLv,
       },
       {
         key: "R",
@@ -444,7 +482,8 @@ export class HordeSim {
         unlocked: this.weps.domain > 0,
         ready: this.weps.domain > 0 && this.domainCd <= 0,
         cd: this.domainCd,
-        max: Math.max(10, 17 - this.weps.domain),
+        max: domainCdFor(this.weps.domain),
+        rank: this.weps.domain,
       },
     ];
   }
@@ -462,14 +501,16 @@ export class HordeSim {
 
   choose(id: UpgradeId) {
     if (!this.picks) return;
+    const offer = this.picks.find((p) => p.id === id);
     const def = UPGRADE_MAP[id];
     if (!def) return;
     const lv = (this.weps[id] ?? 0) + 1;
     this.weps[id] = Math.min(def.max, lv);
+    this.lastPick = id;
     this.applyStats();
     this.picks = null;
     this.paused = this.userPaused;
-    this.line = `${def.name}。`;
+    this.line = offer ? `${offer.name}。${offer.tag}。` : `${def.name}。`;
     sfxLevel();
   }
 
@@ -666,38 +707,63 @@ export class HordeSim {
   volleyRed() {
     const R = this.weps.red;
     if (R < 1) return;
-    if (!this.readyCd("red", Math.max(0.65, 1.3 - R * 0.06))) return;
-    const n = 4 + R;
-    const size = 4 + R * 1.15;
+    if (!this.readyCd("red", redCdFor(R))) return;
+    const n = [0, 3, 5, 5, 7][Math.min(4, R)] ?? 3;
+    const size = 4.2 + R * 1.35;
     for (let i = 0; i < n; i++) {
-      const spread = (i - (n - 1) / 2) * (0.16 - Math.min(0.06, R * 0.008));
+      const spread = (i - (n - 1) / 2) * (R >= 2 ? 0.2 : 0.14);
       const ang = this.facing + spread;
-      this.shot(1, this.x, this.y, Math.cos(ang) * 430, Math.sin(ang) * 430, 8 + R * 2.6, 0.55, 0, 0, size);
+      this.shot(1, this.x, this.y, Math.cos(ang) * 430, Math.sin(ang) * 430, 9 + R * 3, 0.55, 0, 0, size);
     }
+    if (R >= 4) {
+      for (let i = -1; i <= 1; i++) {
+        const ang = this.facing + i * 0.1;
+        this.shot(1, this.x, this.y, Math.cos(ang) * 390, Math.sin(ang) * 390, 10, 0.5, 0, 0, size * 0.85);
+      }
+    }
+    this.shake = Math.max(this.shake, R >= 3 ? 5 : 3);
     sfxSkill("red");
   }
 
   volleyCleave() {
     const Cl = this.weps.cleave;
     if (Cl < 1) return;
-    if (!this.readyCd("cleave", Math.max(0.7, 1.25 - Cl * 0.06))) return;
-    this.cleave(68 + Cl * 16, 0.85 + Cl * 0.1, 16 + Cl * 4);
+    if (!this.readyCd("cleave", cleaveCdFor(Cl))) return;
+    const rad = [0, 68, 86, 102, 118][Math.min(4, Cl)] ?? 68;
+    const arc = [0, 0.75, 1.05, 1.4, Math.PI][Math.min(4, Cl)] ?? 0.75;
+    this.cleave(rad, arc, 16 + Cl * 5);
   }
 
   volleyFlame() {
     const F = this.weps.flame;
     if (F < 1) return;
-    if (!this.readyCd("flame", Math.max(1.4, 2.6 - F * 0.14))) return;
+    if (!this.readyCd("flame", flameCdFor(F))) return;
     const t = this.nearest(this.x, this.y);
     const ang = t ? Math.atan2(t.y - this.y, t.x - this.x) : this.facing;
-    this.shot(5, this.x, this.y, Math.cos(ang) * 400, Math.sin(ang) * 400, 22 + F * 8, 0.9, 0, 0, 9 + F * 3.2);
+    const n = F >= 3 ? 2 : 1;
+    const size = 8 + F * 2.4;
+    for (let i = 0; i < n; i++) {
+      const off = n === 1 ? 0 : (i - 0.5) * 0.22;
+      this.shot(
+        5,
+        this.x,
+        this.y,
+        Math.cos(ang + off) * 400,
+        Math.sin(ang + off) * 400,
+        22 + F * 7,
+        0.9,
+        0,
+        0,
+        size,
+      );
+    }
     sfxSkill("red");
   }
 
   spawn(dt: number) {
     const t = this.time;
-    const late = t > 90 ? (t - 90) * 0.05 : 0;
-    const rate = 2.35 + t * 0.085 + late;
+    const late = t > 100 ? (t - 100) * 0.09 : 0;
+    const rate = t < 22 ? 1.55 + t * 0.035 : 2.05 + t * 0.068 + late;
     this.spawnAcc += dt * rate;
     while (this.spawnAcc >= 1) {
       this.spawnAcc -= 1;
@@ -720,7 +786,7 @@ export class HordeSim {
     }
     if (t >= this.nextBoss) {
       this.birth(3, { near: true });
-      this.nextBoss += 48;
+      this.nextBoss += 55;
       this.sawBoss = true;
       this.shake = Math.max(this.shake, 12);
       this.line = "灾核。别眨眼。";
@@ -763,7 +829,7 @@ export class HordeSim {
         y = rand(0, WORLD);
       }
     }
-    const scale = 1 + this.time / 100;
+    const scale = 1 + this.time / 115 + (this.time > 120 ? (this.time - 120) * 0.01 : 0);
     const elite = Boolean(opts?.elite) || kind === 3;
     e.alive = true;
     e.kind = kind;
@@ -818,20 +884,22 @@ export class HordeSim {
     const tickCd = (id: string, base: number) => this.readyCd(id, base);
 
     const L = this.weps.limitless;
-    if (L > 0 && tickCd("limitless", Math.max(0.36, 0.7 - L * 0.04))) {
-      this.ring(70 + L * 16, 14 + L * 4.2, 0);
+    if (L > 0 && tickCd("limitless", L >= 4 ? 0.42 : L >= 3 ? 0.52 : L >= 2 ? 0.62 : 0.72)) {
+      this.ring(78 + (L - 1) * 22, 16 + L * 3, 0);
+      if (L >= 3) this.ring(40 + L * 8, 11 + L * 2, 0);
     }
 
     const B = this.weps.blue;
-    if (B > 0 && tickCd("blue", Math.max(0.5, 1.05 - B * 0.05))) {
-      const n = 1 + Math.floor(B / 2);
-      const size = 8 + B * 3.6;
+    if (B > 0 && tickCd("blue", Math.max(0.52, 1.02 - B * 0.08))) {
+      const n = B >= 4 ? 3 : B >= 2 ? 2 : 1;
+      const size = 8 + B * 3.2;
+      const pierce = B >= 3 ? 1 : 0;
       for (let i = 0; i < n; i++) {
         const t = aim ?? this.nearest(this.x, this.y);
         const ang = t
-          ? Math.atan2(t.y - this.y, t.x - this.x) + (i - (n - 1) / 2) * 0.18
+          ? Math.atan2(t.y - this.y, t.x - this.x) + (i - (n - 1) / 2) * 0.2
           : this.facing;
-        this.shot(0, this.x, this.y, Math.cos(ang) * 280, Math.sin(ang) * 280, 10 + B * 4, 2.4, 0, 1, size);
+        this.shot(0, this.x, this.y, Math.cos(ang) * 280, Math.sin(ang) * 280, 10 + B * 4, 2.4, pierce, 1, size);
       }
       sfxSkill("blue");
     }
@@ -840,24 +908,30 @@ export class HordeSim {
 
     const C = this.weps.clone;
     if (C > 0) {
-      const n = 2 + C;
-      const dist = 48 + C * 6;
+      const n = orbitCount(C);
+      const dist = orbitDist(C, 48);
       for (let i = 0; i < n; i++) {
-        const a = this.anim * 2.2 + (i / n) * Math.PI * 2;
+        const a = this.anim * (C >= 4 ? 2.8 : 2.2) + (i / n) * Math.PI * 2;
         this.orbitHit(this.x + Math.cos(a) * dist, this.y + Math.sin(a) * dist, 10 + C * 2.4, 11 + C * 2);
       }
     }
 
     const S = this.weps.slash;
-    if (S > 0 && tickCd("slash", Math.max(0.32, 0.62 - S * 0.03))) {
-      const n = 1 + Math.floor(S / 2);
-      const size = 12 + S * 3.2;
+    if (S > 0 && tickCd("slash", Math.max(0.34, 0.64 - S * 0.04))) {
+      const n = S >= 4 ? 2 : S >= 2 ? 2 : 1;
+      const size = 12 + S * 3.4;
+      const pierce = S >= 3 ? 2 : 0;
       for (let i = 0; i < n; i++) {
         const t = aim ?? this.nearest(this.x, this.y);
         const ang = t
           ? Math.atan2(t.y - this.y, t.x - this.x) + (i - (n - 1) / 2) * 0.22
           : this.facing;
-        this.shot(4, this.x, this.y, Math.cos(ang) * 520, Math.sin(ang) * 520, 11 + S * 3.4, 0.42 + S * 0.02, 1 + Math.floor(S / 3), 0, size);
+        this.shot(4, this.x, this.y, Math.cos(ang) * 520, Math.sin(ang) * 520, 12 + S * 3.6, 0.44 + S * 0.03, pierce, 0, size);
+      }
+      if (S >= 4) {
+        const cross = this.facing + Math.PI / 2;
+        this.shot(4, this.x, this.y, Math.cos(cross) * 500, Math.sin(cross) * 500, 12 + S * 3, 0.4, 1, 0, size);
+        this.shot(4, this.x, this.y, Math.cos(cross + Math.PI) * 500, Math.sin(cross + Math.PI) * 500, 12 + S * 3, 0.4, 1, 0, size);
       }
     }
 
@@ -867,10 +941,10 @@ export class HordeSim {
 
     const Bl = this.weps.blades;
     if (Bl > 0) {
-      const n = 2 + Bl;
-      const dist = 50 + Bl * 7;
+      const n = orbitCount(Bl);
+      const dist = orbitDist(Bl, 50);
       for (let i = 0; i < n; i++) {
-        const a = this.anim * 2.6 + (i / n) * Math.PI * 2;
+        const a = this.anim * (Bl >= 4 ? 3.1 : 2.6) + (i / n) * Math.PI * 2;
         this.orbitHit(this.x + Math.cos(a) * dist, this.y + Math.sin(a) * dist, 11 + Bl * 2.2, 12 + Bl * 2);
       }
     }
@@ -989,6 +1063,9 @@ export class HordeSim {
       b.y += b.vy * dt;
       b.life -= dt;
       if (b.life <= 0) {
+        if (b.kind === 2 && this.weps.purple >= 3) {
+          this.ringAt(b.x, b.y, 48 + this.weps.purple * 10, 18 + this.weps.purple * 6, 1);
+        }
         b.alive = false;
         continue;
       }
@@ -999,8 +1076,9 @@ export class HordeSim {
         const ny = (e.y - b.y) / 8;
         this.hurtEnemy(e, b.dmg, nx * 40, ny * 40);
         if (b.kind === 5) {
-          const boom = 36 + this.weps.flame * 14;
-          this.ringAt(b.x, b.y, boom, 10 + this.weps.flame * 4, 3);
+          const F = this.weps.flame;
+          const boom = [0, 40, 62, 70, 92][Math.min(4, F)] ?? 40;
+          this.ringAt(b.x, b.y, boom, 10 + F * 5, 3);
           b.alive = false;
           break;
         }
@@ -1153,6 +1231,12 @@ export class HordeSim {
     const vx = Math.cos(ang) * 720;
     const vy = Math.sin(ang) * 720;
     this.shot(2, this.x, this.y, vx, vy, 40 + P * 14, 0.78, 14, 0, size);
+    if (P >= 4) {
+      const o = 20;
+      const px = -Math.sin(ang) * o;
+      const py = Math.cos(ang) * o;
+      this.shot(2, this.x + px, this.y + py, vx, vy, 36 + P * 12, 0.78, 14, 0, size * 0.88);
+    }
     for (let i = 1; i <= 3; i++) {
       this.pushFx(
         this.x + Math.cos(ang) * (36 * i),
@@ -1165,7 +1249,7 @@ export class HordeSim {
         ang,
       );
     }
-    this.purpleCd = Math.max(2.0, 4.0 - P * 0.28);
+    this.purpleCd = purpleCdFor(P);
     this.shake = Math.max(this.shake, 7);
     this.line = "苍。赫。虚式。";
     sfxSkill("purple");
@@ -1215,7 +1299,7 @@ export class HordeSim {
   }
 
   offer() {
-    const picks = rollPicks(this.charId, this.weps, this.time, this.lv);
+    const picks = rollPicks(this.charId, this.weps, this.time, this.lv, Math.random, this.lastPick);
     if (picks.length === 0) {
       this.hp = Math.min(this.maxHp, this.hp + 24);
       this.line = "已经满了。多活一会儿。";
@@ -1250,8 +1334,8 @@ export class HordeSim {
   castDomain() {
     if (this.weps.domain < 1 || this.domainCd > 0) return;
     const lv = this.weps.domain;
-    this.domainCd = Math.max(10, 17 - lv);
-    this.freeze = 1.2 + lv * 0.18;
+    this.domainCd = domainCdFor(lv);
+    this.freeze = 1.1 + lv * 0.3;
     this.usedDomain = true;
     this.shake = Math.max(this.shake, 14);
     this.invuln = Math.max(this.invuln, 0.55);
@@ -1445,8 +1529,8 @@ export class HordeSim {
 
     const C = this.weps.clone;
     if (C > 0 && atlas) {
-      const n = 2 + C;
-      const dist = 48 + C * 6;
+      const n = orbitCount(C);
+      const dist = orbitDist(C, 48);
       const fr = atlas.orb[Math.floor(this.anim * 8) % 4]!;
       const s = 16 + C * 7;
       for (let i = 0; i < n; i++) {
@@ -1459,8 +1543,8 @@ export class HordeSim {
 
     const Bl = this.weps.blades;
     if (Bl > 0 && atlas) {
-      const n = 2 + Bl;
-      const dist = 50 + Bl * 7;
+      const n = orbitCount(Bl);
+      const dist = orbitDist(Bl, 50);
       const fr = atlas.slash[Math.floor(this.anim * 12) % 4]!;
       const s = 22 + Bl * 8;
       for (let i = 0; i < n; i++) {

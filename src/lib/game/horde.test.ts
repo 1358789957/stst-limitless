@@ -165,6 +165,35 @@ describe("HordeSim", () => {
     assert.ok(win.hud().won);
   });
 
+  it("shows QWER ranks after a skill unlocks", () => {
+    const sim = new HordeSim("gojo");
+    const q = sim.hud().skills.find((s) => s.key === "Q");
+    assert.equal(q?.rank, 0);
+    sim.weps.red = 2;
+    sim.weps.purple = 1;
+    const hud = sim.hud();
+    assert.equal(hud.skills.find((s) => s.key === "W")?.rank, 2);
+    assert.equal(hud.skills.find((s) => s.key === "E")?.rank, 1);
+    assert.equal(hud.weps.some((w) => w.id === "limitless" && w.lv === 1), true);
+  });
+
+  it("evolves 无极 into a double pulse at rank 3", () => {
+    const sim = new HordeSim("gojo");
+    sim.weps.limitless = 3;
+    sim.cd.limitless = 0;
+    const before = sim.fx.filter((f) => f.alive).length;
+    sim.fire(0.016);
+    const rings = sim.fx.filter((f) => f.alive).length;
+    assert.ok(rings >= before + 2);
+  });
+
+  it("fires a second 虚式 beam at rank 4", () => {
+    const sim = new HordeSim("gojo");
+    sim.weps.purple = 4;
+    sim.castE();
+    assert.equal(sim.bullets.filter((b) => b.alive && b.kind === 2).length, 2);
+  });
+
   it("does not process input after the run ends", () => {
     const sim = new HordeSim("gojo");
     sim.finish(false);

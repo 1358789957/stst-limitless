@@ -17,6 +17,8 @@ export type UpgradeId =
   | "blades"
   | "sense";
 
+export type OfferTag = "新术" | "进化" | "支援" | "合成" | "术域";
+
 export type UpgradeDef = {
   id: UpgradeId;
   name: string;
@@ -24,6 +26,31 @@ export type UpgradeDef = {
   desc: (lv: number) => string;
   max: number;
   who: CharId[] | "all";
+  role: "verb" | "support" | "climax";
+};
+
+export type Offer = {
+  id: UpgradeId;
+  name: string;
+  kana: string;
+  tag: OfferTag;
+  from: number;
+  to: number;
+  desc: string;
+};
+
+function steps(lines: string[]) {
+  return (lv: number) => lines[Math.max(0, Math.min(lines.length, lv) - 1)] ?? lines[0]!;
+}
+
+export const VERBS: Record<CharId, UpgradeId[]> = {
+  gojo: ["limitless", "blue", "red", "clone", "purple"],
+  sukuna: ["slash", "cleave", "blades", "flame"],
+};
+
+export const SUPPORTS: Record<CharId, UpgradeId[]> = {
+  gojo: ["eyes", "flash", "rct", "speed"],
+  sukuna: ["sense", "flash", "rct", "speed"],
 };
 
 export const UPGRADES: UpgradeDef[] = [
@@ -31,122 +58,205 @@ export const UPGRADES: UpgradeDef[] = [
     id: "limitless",
     name: "无极",
     kana: "无穷",
-    max: 8,
+    max: 4,
     who: ["gojo"],
-    desc: (lv) => `脉冲圈明显变大（半径 ${70 + lv * 16}），摊平伤害提高。`,
+    role: "verb",
+    desc: steps([
+      "贴身脉冲。半径 78。这是你的底。",
+      "圈到 100。靠近的都摊平。",
+      "双圈。里外各打一记。",
+      "双圈加快。真空把人吸进来再碾。",
+    ]),
   },
   {
     id: "blue",
     name: "苍",
     kana: "顺转",
-    max: 8,
+    max: 4,
     who: ["gojo"],
-    desc: (lv) =>
-      `追踪咒力球变大，同时存在 ${1 + Math.floor(lv / 2)} 颗。`,
+    role: "verb",
+    desc: steps([
+      "一颗追踪球。会拐弯。",
+      "两颗同时飞。",
+      "两颗会穿孔。球更大。",
+      "三颗死咬。这是苍的路。",
+    ]),
   },
   {
     id: "red",
     name: "赫",
     kana: "反转",
-    max: 8,
+    max: 4,
     who: ["gojo"],
-    desc: (lv) => `斥力弹变粗，一次轰出 ${4 + lv} 发。W 可立刻再轰。`,
+    role: "verb",
+    desc: steps([
+      "三发散弹。W 也能立刻轰。",
+      "五发，扇面更开。",
+      "五发加粗。打飞。",
+      "七发再补一波。赫把路清开。",
+    ]),
   },
   {
     id: "purple",
     name: "虚式",
     kana: "虚构",
-    max: 6,
+    max: 4,
     who: ["gojo"],
-    desc: (lv) => `主动技。E 放出贯穿光柱，柱体变宽。冷却缩短。`,
+    role: "verb",
+    desc: steps([
+      "E。一根贯穿柱。冷却 5.6 秒。别当普通技砸。",
+      "柱体加宽。还是那一下。",
+      "柱走完炸一圈。",
+      "两根并排。收束用。",
+    ]),
   },
   {
     id: "clone",
     name: "残影",
     kana: "分身",
-    max: 6,
+    max: 4,
     who: ["gojo"],
-    desc: (lv) => `绕身咒力球变大，数量 ${2 + lv}。`,
+    role: "verb",
+    desc: steps([
+      "两颗绕身球。走位就是刀。",
+      "三颗。贴身带绞肉。",
+      "轨道外扩。圈到更远。",
+      "四颗飞转。无极近战的另一条路。",
+    ]),
   },
   {
     id: "eyes",
     name: "六瞳",
     kana: "天与",
-    max: 5,
+    max: 3,
     who: ["gojo"],
-    desc: (lv) => `拾取圈肉眼可见地扩大，宝石从更远处飞来。`,
+    role: "support",
+    desc: steps([
+      "拾取圈拉开。宝石自己飞。",
+      "圈再大一截。远处也吸。",
+      "满图拾取。别弯腰。",
+    ]),
   },
   {
     id: "slash",
     name: "解",
     kana: "斩",
-    max: 8,
+    max: 4,
     who: ["sukuna"],
-    desc: (lv) => `斩击变长变粗，一次 ${1 + Math.floor(lv / 2)} 道。`,
+    role: "verb",
+    desc: steps([
+      "一道斩。切开面前。",
+      "两道并排。",
+      "两道穿孔。斩更长。",
+      "三道十字。空气也是刃。",
+    ]),
   },
   {
     id: "cleave",
     name: "捌",
     kana: "拆",
-    max: 7,
+    max: 4,
     who: ["sukuna"],
-    desc: (lv) => `近身横扫半径变大，扇面更宽。W 可立刻再拆。`,
+    role: "verb",
+    desc: steps([
+      "近身一扇。W 也能立刻拆。",
+      "扇面加宽。",
+      "半圆横扫。贴脸的都碎。",
+      "整圈拆开。站在刀口中央。",
+    ]),
   },
   {
     id: "flame",
     name: "开",
     kana: "火",
-    max: 6,
+    max: 4,
     who: ["sukuna"],
-    desc: (lv) => `火矢爆炸圈变大，灼烧更狠。E 可立刻再开。`,
+    role: "verb",
+    desc: steps([
+      "E。一矢炸开。冷却 3.1 秒。留着清堆。",
+      "爆炸圈到 62。",
+      "两矢。还是慢。",
+      "两矢巨爆。开完再走。",
+    ]),
   },
   {
     id: "blades",
     name: "厨刀",
     kana: "绕",
-    max: 6,
+    max: 4,
     who: ["sukuna"],
-    desc: (lv) => `绕身斩刃变大，数量 ${2 + lv}。`,
+    role: "verb",
+    desc: steps([
+      "两把绕身刃。走过去就是割。",
+      "三把。",
+      "轨道外扩。圈到更远。",
+      "四把飞转。别让人靠近。",
+    ]),
   },
   {
     id: "sense",
     name: "嗅血",
     kana: "猎",
-    max: 5,
+    max: 3,
     who: ["sukuna"],
-    desc: (lv) => `拾取圈扩大，咒力宝石会被拽过来。`,
+    role: "support",
+    desc: steps([
+      "拾取圈拉开。宝石会被拽过来。",
+      "圈再大。猎得更远。",
+      "满图嗅血。宝石自己跪。",
+    ]),
   },
   {
     id: "flash",
     name: "黑闪",
     kana: "时空",
-    max: 6,
+    max: 3,
     who: "all",
-    desc: (lv) => `暴击变成黑闪连锁，弹跳 ${lv} 个目标。击杀喷血。`,
+    role: "support",
+    desc: steps([
+      "暴击跳 1 个。击杀喷血。",
+      "连锁 2 跳。",
+      "连锁 3 跳。黑闪自己找人。",
+    ]),
   },
   {
     id: "rct",
     name: "逆转",
     kana: "再生",
-    max: 5,
+    max: 3,
     who: "all",
-    desc: (lv) => `生命上限 +${18 * lv}，持续回血，头顶跳出回复。`,
+    role: "support",
+    desc: steps([
+      "生命 +18，开始回血。",
+      "生命 +36，回血加快。",
+      "生命 +54。站得住才能放术域。",
+    ]),
   },
   {
     id: "speed",
     name: "步法",
     kana: "踏",
-    max: 5,
+    max: 3,
     who: "all",
-    desc: (lv) => `移速 +${lv * 20}%，身后残影更长。`,
+    role: "support",
+    desc: steps([
+      "移速 +20%。残影跟着你。",
+      "移速 +40%。",
+      "移速 +60%。右键点地也是斩。",
+    ]),
   },
   {
     id: "domain",
     name: "术域",
     kana: "必中",
-    max: 4,
+    max: 3,
     who: "all",
-    desc: () => "主动技。展开后全屏必中。R 或右侧按钮。",
+    role: "climax",
+    desc: steps([
+      "R。全屏必中。冷却 22 秒。留着清场。",
+      "冻更久，打更狠。冷却 18 秒。",
+      "冷却 15 秒。还是大技。别手痒。",
+    ]),
   },
 ];
 
@@ -165,7 +275,45 @@ export function poolFor(char: CharId) {
   return UPGRADES.filter((u) => u.who === "all" || u.who.includes(char));
 }
 
-/** Mid-run spotlight so a decent game actually sees 虚式 / 术域. */
+export function craftId(char: CharId, weps: Record<UpgradeId, number>): UpgradeId | null {
+  if (char === "gojo" && weps.blue >= 2 && weps.red >= 2 && weps.purple < 1) return "purple";
+  if (char === "sukuna" && weps.slash >= 2 && weps.cleave >= 2 && weps.flame < 1) return "flame";
+  return null;
+}
+
+export function inferTag(id: UpgradeId, from: number, asCraft = false): OfferTag {
+  if (asCraft) return "合成";
+  if (id === "domain") return "术域";
+  if (UPGRADE_MAP[id].role === "support") return "支援";
+  if (from <= 0) return "新术";
+  return "进化";
+}
+
+export function makeOffer(
+  id: UpgradeId,
+  weps: Record<UpgradeId, number>,
+  tag?: OfferTag,
+): Offer {
+  const def = UPGRADE_MAP[id];
+  const from = weps[id] ?? 0;
+  const to = Math.min(def.max, from + 1);
+  const craft = tag === "合成";
+  return {
+    id,
+    name: craft ? (id === "purple" ? "虚式·合成" : "开·合成") : def.name,
+    kana: craft ? "极致" : def.kana,
+    tag: tag ?? inferTag(id, from),
+    from,
+    to,
+    desc: craft
+      ? id === "purple"
+        ? "苍和赫叠够了。E 开虚式，一根贯穿柱。"
+        : "解和捌叠够了。E 开火矢。"
+      : def.desc(to),
+  };
+}
+
+/** Mid/late spotlight only. Early forks come from the 3-pick mixer, not a railroad. */
 export function spotlightId(
   char: CharId,
   weps: Record<UpgradeId, number>,
@@ -173,14 +321,30 @@ export function spotlightId(
   level: number,
 ): UpgradeId | null {
   const owned = (id: UpgradeId) => (weps[id] ?? 0) > 0;
-  if (char === "gojo" && !owned("blue") && level >= 2) return "blue";
-  if (char === "sukuna" && !owned("cleave") && level >= 2) return "cleave";
-  if (char === "gojo" && !owned("purple") && (level >= 4 || time >= 42)) return "purple";
-  if (char === "sukuna" && !owned("flame") && (level >= 4 || time >= 48)) return "flame";
-  if (!owned("domain") && (level >= 6 || time >= 75)) return "domain";
-  if (char === "gojo" && !owned("red") && (level >= 5 || time >= 60)) return "red";
-  if (char === "sukuna" && !owned("blades") && level >= 5) return "blades";
+  if (!owned("domain") && (level >= 7 || time >= 95)) return "domain";
+  if (char === "gojo" && !owned("purple") && (level >= 5 || time >= 58)) return "purple";
+  if (char === "sukuna" && !owned("flame") && (level >= 5 || time >= 62)) return "flame";
   return null;
+}
+
+function pickWeighted(
+  ids: UpgradeId[],
+  weight: (id: UpgradeId) => number,
+  rng: () => number,
+): UpgradeId | null {
+  const avail = ids
+    .filter((id) => weight(id) > 0)
+    .sort((a, b) => weight(b) - weight(a) || a.localeCompare(b));
+  if (!avail.length) return null;
+  const weights = avail.map(weight);
+  const sum = weights.reduce((a, b) => a + b, 0);
+  if (sum <= 0) return null;
+  let r = rng() * sum;
+  for (let i = 0; i < avail.length; i++) {
+    r -= weights[i]!;
+    if (r <= 0) return avail[i]!;
+  }
+  return avail[avail.length - 1]!;
 }
 
 export function rollPicks(
@@ -189,19 +353,90 @@ export function rollPicks(
   time: number,
   level: number,
   rng: () => number = Math.random,
-): UpgradeDef[] {
+  lastPick: UpgradeId | null = null,
+): Offer[] {
   const pool = poolFor(char).filter((u) => (weps[u.id] ?? 0) < u.max);
   if (pool.length === 0) return [];
-  const picks: UpgradeDef[] = [];
-  const bag = [...pool];
+
+  const allowed = new Set(pool.map((u) => u.id));
+  const taken = new Set<UpgradeId>();
+  const out: Offer[] = [];
+
+  const add = (id: UpgradeId | null, tag?: OfferTag) => {
+    if (!id || taken.has(id) || !allowed.has(id)) return false;
+    taken.add(id);
+    out.push(makeOffer(id, weps, tag));
+    return true;
+  };
+
+  const craft = craftId(char, weps);
+  if (craft) add(craft, "合成");
+
   const spot = spotlightId(char, weps, time, level);
-  if (spot) {
-    const i = bag.findIndex((u) => u.id === spot);
-    if (i >= 0) picks.push(bag.splice(i, 1)[0]!);
+  if (spot) add(spot, spot === craft ? "合成" : undefined);
+
+  const verbs = VERBS[char];
+  const supports = SUPPORTS[char];
+  const starter: UpgradeId = char === "gojo" ? "limitless" : "slash";
+  const extraVerbs = verbs.filter((id) => id !== starter && (weps[id] ?? 0) > 0).length;
+  const newVerbs = verbs.filter((id) => (weps[id] ?? 0) === 0 && allowed.has(id));
+  const evolvable = pool.filter((u) => (weps[u.id] ?? 0) > 0).map((u) => u.id);
+
+  const climaxEarly = (id: UpgradeId) => {
+    if (id === "purple" || id === "flame") return time < 50 ? 0.12 : 1;
+    return 1;
+  };
+
+  if (out.length < 3 && extraVerbs < 2 && newVerbs.length) {
+    add(pickWeighted(newVerbs, climaxEarly, rng));
   }
-  while (picks.length < 3 && bag.length) {
-    const i = Math.floor(rng() * bag.length);
-    picks.push(bag.splice(i, 1)[0]!);
+  if (out.length < 3 && extraVerbs < 2 && (level <= 4 || time < 75) && newVerbs.some((id) => !taken.has(id))) {
+    add(pickWeighted(newVerbs.filter((id) => !taken.has(id)), climaxEarly, rng));
   }
-  return picks;
+
+  if (out.length < 3 && evolvable.some((id) => !taken.has(id))) {
+    add(
+      pickWeighted(
+        evolvable.filter((id) => !taken.has(id)),
+        (id) => {
+          const lv = weps[id] ?? 0;
+          return 0.8 + lv * 1.35 + (id === lastPick ? 2.2 : 0) + (id === starter ? 0.35 : 0.7);
+        },
+        rng,
+      ),
+    );
+  }
+
+  if (out.length < 3 && (time > 28 || extraVerbs >= 1)) {
+    add(
+      pickWeighted(
+        supports.filter((id) => allowed.has(id) && !taken.has(id)),
+        (id) => ((weps[id] ?? 0) > 0 ? 0.55 : 1),
+        rng,
+      ),
+    );
+  }
+
+  const rest = pool
+    .map((u) => u.id)
+    .filter((id) => {
+      if (taken.has(id)) return false;
+      if (id === "domain" && time < 90 && level < 7) return false;
+      return true;
+    });
+  while (out.length < 3 && rest.length) {
+    const id = pickWeighted(rest, (cand) => {
+      const lv = weps[cand] ?? 0;
+      if (cand === "domain") return 0.35;
+      if (verbs.includes(cand) && lv > 0) return 2.2;
+      if (verbs.includes(cand) && lv === 0) return extraVerbs >= 2 ? 0.35 : 1.1;
+      return 0.7;
+    }, rng);
+    if (!id) break;
+    add(id);
+    const i = rest.indexOf(id);
+    if (i >= 0) rest.splice(i, 1);
+  }
+
+  return out.slice(0, 3);
 }
