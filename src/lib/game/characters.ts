@@ -1,3 +1,5 @@
+import { publicUrl } from "./asset-url.ts";
+
 export type CharId = "gojo" | "sukuna";
 
 export type CharDef = {
@@ -26,7 +28,7 @@ export const CHARS: CharDef[] = [
     title: "最强",
     kana: "LIMITLESS",
     blurb: "无极把靠近的东西摊平。走位，让术式自己割。",
-    portrait: "/art/hero.png",
+    portrait: publicUrl("art/hero.png"),
     sprite: "hero",
     accent: "ice",
     start: "limitless",
@@ -43,7 +45,7 @@ export const CHARS: CharDef[] = [
     title: "灾祸",
     kana: "DISMANTLE",
     blurb: "解把空气切开，捌把靠近的东西拆掉。别站在刀口上。",
-    portrait: "/art/sukuna.jpg",
+    portrait: publicUrl("art/sukuna.jpg"),
     sprite: "sukuna",
     accent: "blood",
     start: "slash",

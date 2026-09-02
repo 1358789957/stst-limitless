@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Volume2, VolumeX } from "lucide-react";
 import { InfinityMark } from "@/components/game/Mark";
+import { publicUrl } from "@/lib/game/asset-url";
 import { unlockAudio, setMuted } from "@/lib/game/audio";
 import { CHARS, type CharId } from "@/lib/game/characters";
 import { formatClock } from "@/lib/game/format";
@@ -30,7 +31,7 @@ export function StartScreen({
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden bg-ink text-paper">
       <img
-        src="/art/bg.jpg"
+        src={publicUrl("art/bg.jpg")}
         alt=""
         className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-40"
       />

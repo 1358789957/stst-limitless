@@ -33,6 +33,14 @@ npm run dev
 npm run build
 ```
 
+静态页（给 deepdemos 这类只要根上有 `index.html` 的主机）：
+
+```bash
+npm run build:static
+```
+
+产物在 `artifacts/5t5-limitless-web.zip`。解开后 `index.html` 必须在根目录，直接上传那个 zip。不经过 Node / 登录 / PWA。`npm run dev` 不受影响。
+
 ## 技术
 
 TanStack Start · Vite · React · Canvas 2D · Tailwind
