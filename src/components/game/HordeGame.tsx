@@ -533,6 +533,7 @@ declare global {
       hud: () => HudSnap;
       setMoveTarget: (x: number, y: number) => void;
       grant: (id: string, n: number) => HudSnap;
+      debug: () => { lasers: number; chains: number; fields: number };
     };
   }
 }
