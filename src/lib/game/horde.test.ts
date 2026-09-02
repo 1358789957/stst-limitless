@@ -94,6 +94,7 @@ describe("HordeSim", () => {
     win.tick(0.05);
     assert.equal(win.over, true);
     assert.equal(win.won, true);
+    assert.ok(win.time >= CLEAR_TIME);
     assert.ok(win.hud().won);
   });
 

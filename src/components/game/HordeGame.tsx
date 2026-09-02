@@ -131,8 +131,24 @@ export function HordeGame({
       },
     };
     window.__controlsTest = probe;
+    window.__hordeTest = {
+      offer: () => {
+        sim.offer();
+        return sim.hud();
+      },
+      finish: (won: boolean) => {
+        sim.finish(won);
+        return sim.hud();
+      },
+      choose: (id: string) => {
+        sim.choose(id as UpgradeId);
+        return sim.hud();
+      },
+      hud: () => sim.hud(),
+    };
     return () => {
       if (window.__controlsTest === probe) delete window.__controlsTest;
+      if (window.__hordeTest) delete window.__hordeTest;
     };
   }, []);
 
@@ -299,7 +315,7 @@ export function HordeGame({
             </button>
             <button
               type="button"
-              aria-label={hud.userPaused ? "继续" : "暂停"}
+              aria-label={hud.userPaused ? "恢复游戏" : "暂停"}
               onClick={() => {
                 unlockAudio();
                 simRef.current.togglePause();
@@ -517,6 +533,12 @@ declare global {
       getX: () => number;
       setKeys: (codes: string[]) => void;
       setSteer?: (v: number) => void;
+    };
+    __hordeTest?: {
+      offer: () => HudSnap;
+      finish: (won: boolean) => HudSnap;
+      choose: (id: string) => HudSnap;
+      hud: () => HudSnap;
     };
   }
 }

@@ -421,6 +421,7 @@ export class HordeSim {
     this.over = true;
     this.won = won;
     this.hp = won ? this.hp : 0;
+    if (won) this.time = Math.max(this.time, CLEAR_TIME);
     this.paused = false;
     this.userPaused = false;
     this.picks = null;
