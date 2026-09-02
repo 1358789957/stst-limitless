@@ -166,6 +166,15 @@ export function HordeGame({
       },
       hud: () => sim.hud(),
       setMoveTarget: (x: number, y: number) => sim.setMoveTarget(x, y),
+      grant: (id: string, n: number) => {
+        sim.weps[id as UpgradeId] = n;
+        return sim.hud();
+      },
+      debug: () => ({
+        lasers: sim.lasers.filter((l) => l.alive).length,
+        chains: sim.chains.length,
+        fields: sim.fields.filter((f) => f.alive).length,
+      }),
     };
     return () => {
       if (window.__controlsTest === probe) delete window.__controlsTest;
@@ -523,6 +532,7 @@ declare global {
       choose: (id: string) => HudSnap;
       hud: () => HudSnap;
       setMoveTarget: (x: number, y: number) => void;
+      grant: (id: string, n: number) => HudSnap;
     };
   }
 }

@@ -194,6 +194,38 @@ describe("HordeSim", () => {
     assert.equal(sim.bullets.filter((b) => b.alive && b.kind === 2).length, 2);
   });
 
+  it("hops 咒痕 from a 苍 hit onto a neighbor", () => {
+    const sim = new HordeSim("gojo");
+    sim.weps.ripple = 2;
+    sim.birth(0, { near: true });
+    sim.birth(0, { near: true });
+    const live = sim.enemies.filter((e) => e.alive);
+    assert.ok(live.length >= 2);
+    live[0]!.x = sim.x + 30;
+    live[0]!.y = sim.y;
+    live[1]!.x = sim.x + 80;
+    live[1]!.y = sim.y;
+    const hp1 = live[1]!.hp;
+    sim.shot(0, sim.x, sim.y, 400, 0, 40, 0.4, 0, 0, 10);
+    sim.moveBullets(0.05);
+    sim.stepChains(0.2);
+    assert.ok(live[1]!.hp < hp1 || sim.chains.length > 0 || sim.fields.some((f) => f.alive));
+  });
+
+  it("spawns a sweeping 扫射 laser when unlocked", () => {
+    const sim = new HordeSim("gojo");
+    sim.weps.ray = 1;
+    sim.fire(0.016);
+    assert.ok(sim.lasers.some((l) => l.alive && l.hue === 0));
+  });
+
+  it("spawns a 光刃 laser for Sukuna", () => {
+    const sim = new HordeSim("sukuna");
+    sim.weps.beam = 2;
+    sim.fire(0.016);
+    assert.ok(sim.lasers.some((l) => l.alive && l.hue === 1));
+  });
+
   it("does not process input after the run ends", () => {
     const sim = new HordeSim("gojo");
     sim.finish(false);

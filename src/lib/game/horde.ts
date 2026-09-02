@@ -25,7 +25,9 @@ export const EXTRA_START: Record<CharId, UpgradeId> = {
 const MAX_E = 200;
 const MAX_B = 280;
 const MAX_G = 180;
-const MAX_FX = 140;
+const MAX_FX = 240;
+const MAX_LASER = 8;
+const MAX_FIELD = 18;
 
 type Kind = 0 | 1 | 2 | 3;
 
@@ -45,6 +47,7 @@ type Enemy = {
   hurt: number;
   seed: number;
   elite: boolean;
+  mark: number;
 };
 
 type Bullet = {
@@ -59,6 +62,40 @@ type Bullet = {
   life: number;
   pierce: number;
   homing: number;
+};
+
+type Chain = {
+  x: number;
+  y: number;
+  hops: number;
+  wait: number;
+  dmg: number;
+  kind: 0 | 1 | 2;
+  reach: number;
+};
+
+type Laser = {
+  alive: boolean;
+  hue: 0 | 1 | 2;
+  ang: number;
+  sweep: number;
+  len: number;
+  wide: number;
+  life: number;
+  max: number;
+  dmg: number;
+  acc: number;
+};
+
+type Field = {
+  alive: boolean;
+  x: number;
+  y: number;
+  r: number;
+  life: number;
+  dmg: number;
+  acc: number;
+  hue: 0 | 1;
 };
 
 type Gem = { alive: boolean; x: number; y: number; v: number };
@@ -116,6 +153,14 @@ function cleaveCdFor(c: number) {
 
 function flameCdFor(f: number) {
   return [0, 3.1, 2.8, 2.5, 2.2][Math.min(4, Math.max(0, f))] ?? 3.1;
+}
+
+function rayCdFor(lv: number) {
+  return [0, 1.55, 1.4, 1.25, 1.1][Math.min(4, Math.max(0, lv))] ?? 1.55;
+}
+
+function beamCdFor(lv: number) {
+  return [0, 1.7, 1.5, 1.35, 1.2][Math.min(4, Math.max(0, lv))] ?? 1.7;
 }
 
 function clamp(v: number, a: number, b: number) {
@@ -250,7 +295,11 @@ export class HordeSim {
   hitstop = 0;
   healAcc = 0;
   trail: { x: number; y: number; flip: boolean }[] = [];
-  chains: { x: number; y: number; hops: number; wait: number; dmg: number }[] = [];
+  chains: Chain[] = [];
+  lasers: Laser[] = [];
+  fields: Field[] = [];
+  li = 0;
+  fi2 = 0;
 
   enemies: Enemy[] = [];
   bullets: Bullet[] = [];
@@ -319,6 +368,10 @@ export class HordeSim {
     this.healAcc = 0;
     this.trail = [];
     this.chains = [];
+    this.lasers = Array.from({ length: MAX_LASER }, () => this.emptyLaser());
+    this.fields = Array.from({ length: MAX_FIELD }, () => this.emptyField());
+    this.li = 0;
+    this.fi2 = 0;
     this.wantDomain = false;
     this.wantDash = false;
     this.wantSecondary = false;
@@ -354,6 +407,7 @@ export class HordeSim {
       hurt: 0,
       seed: Math.random(),
       elite: false,
+      mark: 0,
     };
   }
   emptyB(): Bullet {
@@ -384,6 +438,25 @@ export class HordeSim {
       crit: false,
       ang: 0,
     };
+  }
+
+  emptyLaser(): Laser {
+    return {
+      alive: false,
+      hue: 0,
+      ang: 0,
+      sweep: 0,
+      len: 220,
+      wide: 8,
+      life: 0,
+      max: 0.5,
+      dmg: 8,
+      acc: 0,
+    };
+  }
+
+  emptyField(): Field {
+    return { alive: false, x: 0, y: 0, r: 40, life: 0, dmg: 6, acc: 0, hue: 0 };
   }
 
   setKeys(codes: string[]) {
@@ -621,10 +694,12 @@ export class HordeSim {
     this.fire(step);
     this.moveBullets(step);
     this.stepChains(step);
+    this.stepLasers(step);
+    this.stepFields(step);
     this.gemsStep(step);
     this.fxStep(step);
     this.contact();
-    this.shake = Math.max(0, this.shake - step * 28);
+    this.shake = Math.max(0, this.shake - step * 20);
 
     if (this.hp <= 0 && !this.over) this.finish(false);
     else if (this.time >= CLEAR_TIME && !this.over) this.finish(true);
@@ -757,6 +832,9 @@ export class HordeSim {
         size,
       );
     }
+    if (F >= 2) {
+      this.spawnLaser(2, ang, 0.15, 240 + F * 30, 8 + F * 2.5, 0.28 + F * 0.04, 16 + F * 5);
+    }
     sfxSkill("red");
   }
 
@@ -844,6 +922,7 @@ export class HordeSim {
     e.hurt = 0;
     e.seed = Math.random();
     e.elite = elite;
+    e.mark = 0;
   }
 
   moveEnemies(dt: number) {
@@ -851,6 +930,7 @@ export class HordeSim {
     for (const e of this.enemies) {
       if (!e.alive) continue;
       e.hurt = Math.max(0, e.hurt - dt);
+      e.mark = Math.max(0, e.mark - dt);
       const dx = this.x - e.x;
       const dy = this.y - e.y;
       const d = Math.hypot(dx, dy) || 1;
@@ -939,6 +1019,30 @@ export class HordeSim {
 
     if (this.weps.flame > 0) this.volleyFlame();
 
+    const Ray = this.weps.ray;
+    if (Ray > 0 && tickCd("ray", rayCdFor(Ray))) {
+      const t = aim ?? this.nearest(this.x, this.y);
+      const ang = t ? Math.atan2(t.y - this.y, t.x - this.x) : this.facing;
+      const life = Ray >= 3 ? 0.82 : 0.52;
+      const wide = 7 + Ray * 3.2;
+      const len = 260 + Ray * 40;
+      this.spawnLaser(0, ang - 0.7, 2.4, len, wide, life, 9 + Ray * 3);
+      if (Ray >= 4) this.spawnLaser(0, ang + 0.7, -2.4, len, wide * 0.85, life, 8 + Ray * 2);
+      this.line = "六瞳。锁。";
+    }
+
+    const Bm = this.weps.beam;
+    if (Bm > 0 && tickCd("beam", beamCdFor(Bm))) {
+      const t = aim ?? this.nearest(this.x, this.y);
+      const ang = t ? Math.atan2(t.y - this.y, t.x - this.x) : this.facing;
+      const life = Bm >= 3 ? 0.7 : 0.4;
+      const wide = 6 + Bm * 2.8;
+      const len = 320 + Bm * 50;
+      this.spawnLaser(1, ang - 0.9, 3.1, len, wide, life, 11 + Bm * 3.5);
+      if (Bm >= 4) this.spawnLaser(1, ang + 0.9, -3.1, len, wide * 0.9, life, 10 + Bm * 3);
+      this.line = "解。一线。";
+    }
+
     const Bl = this.weps.blades;
     if (Bl > 0) {
       const n = orbitCount(Bl);
@@ -955,7 +1059,8 @@ export class HordeSim {
   }
 
   ringAt(x: number, y: number, rad: number, dmg: number, kind: number) {
-    this.pushFx(x, y, rad, 0.35, kind === 1 ? 3 : kind === 3 ? 3 : 1, "", false);
+    this.pushFx(x, y, rad, 0.48, kind === 1 ? 3 : kind === 3 ? 3 : 1, "", false);
+    this.pushFx(x, y, rad * 0.45, 0.22, 18, "", false);
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const d = Math.hypot(e.x - x, e.y - y);
@@ -978,6 +1083,7 @@ export class HordeSim {
 
   cleave(rad: number, arc: number, dmg: number) {
     const face = this.facing;
+    let hopped = 0;
     this.pushFx(this.x, this.y, rad, 0.28, 8, "", false, face);
     for (let i = -2; i <= 2; i++) {
       this.pushFx(
@@ -1001,7 +1107,14 @@ export class HordeSim {
       let diff = ang - face;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
-      if (Math.abs(diff) <= arc) this.hurtEnemy(e, dmg, (dx / d) * 80, (dy / d) * 80);
+      if (Math.abs(diff) <= arc) {
+        this.hurtEnemy(e, dmg, (dx / d) * 80, (dy / d) * 80);
+        if (this.weps.plague > 0 && hopped < 2) {
+          e.mark = 0.45;
+          this.spreadPlague(e.x, e.y);
+          hopped += 1;
+        }
+      }
     }
   }
 
@@ -1062,6 +1175,9 @@ export class HordeSim {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       b.life -= dt;
+      if ((b.kind === 0 || b.kind === 1 || b.kind === 2) && Math.random() < 0.45) {
+        this.pushFx(b.x, b.y, b.kind === 2 ? b.r : 4, 0.12, b.kind === 1 ? 13 : 15, "", false, Math.atan2(b.vy, b.vx));
+      }
       if (b.life <= 0) {
         if (b.kind === 2 && this.weps.purple >= 3) {
           this.ringAt(b.x, b.y, 48 + this.weps.purple * 10, 18 + this.weps.purple * 6, 1);
@@ -1075,6 +1191,10 @@ export class HordeSim {
         const nx = (e.x - b.x) / 8;
         const ny = (e.y - b.y) / 8;
         this.hurtEnemy(e, b.dmg, nx * 40, ny * 40);
+        if (b.kind === 0 && this.weps.ripple > 0) this.spreadRipple(e.x, e.y, false);
+        if (b.kind === 4 && (this.weps.slash >= 3 || this.weps.plague >= 4)) {
+          this.queueHop(e.x, e.y, this.weps.plague >= 4 ? Math.min(3, this.weps.plague) : 1, b.dmg * 0.5, 2, 120);
+        }
         if (b.kind === 5) {
           const F = this.weps.flame;
           const boom = [0, 40, 62, 70, 92][Math.min(4, F)] ?? 40;
@@ -1100,38 +1220,62 @@ export class HordeSim {
     e.x += kx * 0.016;
     e.y += ky * 0.016;
     this.pushFx(e.x, e.y - 18, 0, 0.55, 2, `${Math.floor(dmg)}`, crit);
+    for (let i = 0; i < (crit ? 6 : 3); i++) {
+      this.pushFx(e.x, e.y, 6, 0.16, 13, "", crit, Math.random() * Math.PI * 2);
+    }
     if (crit && fl > 0) {
-      this.pushFx(e.x, e.y, 28 + fl * 10, 0.28, 5, "黑闪", true);
+      this.pushFx(e.x, e.y, 36 + fl * 12, 0.38, 5, "黑闪", true);
+      this.shake = Math.max(this.shake, 8 + fl * 2);
       sfxCrit();
       if (!fromChain) {
-        this.chains.push({
-          x: e.x,
-          y: e.y,
-          hops: fl,
-          wait: 0.07,
-          dmg: raw * this.critDmg,
-        });
+        this.queueHop(e.x, e.y, fl, raw * this.critDmg, 0, 140 + fl * 36);
       }
     }
-    if (crit && fl > 0) this.hitstop = Math.max(this.hitstop, 0.045);
+    if (crit && fl > 0) this.hitstop = Math.max(this.hitstop, 0.06);
     if (e.hp <= 0) {
       e.alive = false;
       this.kills += 1;
       this.drop(e.x, e.y, e.xp);
-      this.pushFx(e.x, e.y, e.r * 2.2, 0.28, 4, "", false);
+      this.pushFx(e.x, e.y, e.r * 3.4, 0.4, 18, "", false);
+      this.pushFx(e.x, e.y, e.r * 2.6, 0.34, 4, "", false);
       this.bloodSpray(e.x, e.y);
-      if (e.kind === 3) this.shake = Math.max(this.shake, 10);
+      if (this.weps.ripple >= 4) this.spreadRipple(e.x, e.y, true);
+      if (e.kind === 3) this.shake = Math.max(this.shake, 12);
+      else this.shake = Math.max(this.shake, 3);
       if (this.kills % 8 === 0) sfxKill();
       else sfxHit();
     }
   }
 
   bloodSpray(x: number, y: number) {
-    this.pushFx(x, y, 42, 0.42, 10, "", false);
-    for (let i = 0; i < 5; i++) {
+    this.pushFx(x, y, 56, 0.5, 10, "", false);
+    const n = 8;
+    for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
-      this.pushFx(x + Math.cos(a) * 10, y + Math.sin(a) * 8, 8, 0.28, 11, "", false, a);
+      this.pushFx(x + Math.cos(a) * 12, y + Math.sin(a) * 10, 10, 0.34, 11, "", false, a);
     }
+  }
+
+  spreadRipple(x: number, y: number, fromKill: boolean) {
+    const R = this.weps.ripple;
+    if (R < 1) return;
+    if (!fromKill && !this.readyCd("rippleHop", 0.12)) return;
+    const hops = R >= 4 ? 3 : R >= 2 ? 2 : 1;
+    this.queueHop(x, y, hops, 8 + R * 3, 1, 88 + R * 22);
+    if (R >= 3) this.spawnField(x, y, 46 + R * 10, 0.7 + R * 0.12, 6 + R * 2, 0);
+  }
+
+  spreadPlague(x: number, y: number) {
+    const P = this.weps.plague;
+    if (P < 1) return;
+    const hops = P >= 4 ? 3 : P >= 2 ? 2 : 1;
+    this.queueHop(x, y, hops, 9 + P * 3.5, 2, 96 + P * 20);
+    if (P >= 3) this.spawnField(x, y, 50 + P * 12, 0.55, 7 + P * 2, 1);
+  }
+
+  queueHop(x: number, y: number, hops: number, dmg: number, kind: 0 | 1 | 2, reach: number) {
+    this.chains.push({ x, y, hops, wait: kind === 0 ? 0.11 : 0.07, dmg, kind, reach });
+    this.pushFx(x, y, 26, 0.2, kind === 1 ? 16 : kind === 2 ? 17 : 5, "", kind === 0);
   }
 
   stepChains(dt: number) {
@@ -1140,7 +1284,7 @@ export class HordeSim {
       if (c.wait > 0) continue;
       let best: Enemy | null = null;
       let bd = 1e9;
-      const reach = 120 + this.weps.flash * 28;
+      const reach = c.reach || 120 + this.weps.flash * 28;
       for (const e of this.enemies) {
         if (!e.alive) continue;
         const d = Math.hypot(e.x - c.x, e.y - c.y);
@@ -1154,14 +1298,111 @@ export class HordeSim {
         c.hops = 0;
         continue;
       }
-      this.pushFx((c.x + best.x) / 2, (c.y + best.y) / 2, bd * 0.5, 0.12, 9, "", true, Math.atan2(best.y - c.y, best.x - c.x));
-      this.hurtEnemy(best, c.dmg / this.critDmg, 0, 0, true);
+      const ang = Math.atan2(best.y - c.y, best.x - c.x);
+      this.pushFx((c.x + best.x) / 2, (c.y + best.y) / 2, bd * 0.52, 0.2, 14, "", c.kind === 0, ang);
+      if (c.kind === 1) this.pushFx(best.x, best.y, 34, 0.28, 16, "", false);
+      if (c.kind === 2) this.pushFx(best.x, best.y, 36, 0.28, 17, "", false);
+      if (c.kind === 0) this.shake = Math.max(this.shake, 5);
+      const raw = c.kind === 0 ? c.dmg / this.critDmg : c.dmg;
+      this.hurtEnemy(best, raw, 0, 0, true);
       c.x = best.x;
       c.y = best.y;
       c.hops -= 1;
-      c.wait = 0.08;
+      c.wait = c.kind === 0 ? 0.12 : 0.08;
     }
     this.chains = this.chains.filter((c) => c.hops > 0);
+  }
+
+  spawnLaser(
+    hue: 0 | 1 | 2,
+    ang: number,
+    sweep: number,
+    len: number,
+    wide: number,
+    life: number,
+    dmg: number,
+  ) {
+    let L: Laser | null = null;
+    for (let i = 0; i < MAX_LASER; i++) {
+      const idx = (this.li + i) % MAX_LASER;
+      if (!this.lasers[idx]!.alive) {
+        L = this.lasers[idx]!;
+        this.li = idx + 1;
+        break;
+      }
+    }
+    if (!L) return;
+    L.alive = true;
+    L.hue = hue;
+    L.ang = ang;
+    L.sweep = sweep;
+    L.len = len;
+    L.wide = wide;
+    L.life = life;
+    L.max = life;
+    L.dmg = dmg;
+    L.acc = 0;
+    this.shake = Math.max(this.shake, hue === 0 ? 4 : 5);
+  }
+
+  stepLasers(dt: number) {
+    for (const L of this.lasers) {
+      if (!L.alive) continue;
+      L.life -= dt;
+      L.ang += L.sweep * dt;
+      L.acc += dt;
+      const x2 = this.x + Math.cos(L.ang) * L.len;
+      const y2 = this.y + Math.sin(L.ang) * L.len;
+      if (L.acc >= 0.07) {
+        L.acc = 0;
+        for (const e of this.enemies) {
+          if (!e.alive) continue;
+          const d = distToSeg(e.x, e.y, this.x, this.y, x2, y2);
+          if (d < e.r + L.wide) this.hurtEnemy(e, L.dmg * 0.35, 0, 0);
+        }
+        this.pushFx((this.x + x2) / 2, (this.y + y2) / 2, L.len * 0.45, 0.1, 15, "", false, L.ang);
+      }
+      if (L.life <= 0) L.alive = false;
+    }
+  }
+
+  spawnField(x: number, y: number, r: number, life: number, dmg: number, hue: 0 | 1) {
+    let f: Field | null = null;
+    for (let i = 0; i < MAX_FIELD; i++) {
+      const idx = (this.fi2 + i) % MAX_FIELD;
+      if (!this.fields[idx]!.alive) {
+        f = this.fields[idx]!;
+        this.fi2 = idx + 1;
+        break;
+      }
+    }
+    if (!f) return;
+    f.alive = true;
+    f.x = x;
+    f.y = y;
+    f.r = r;
+    f.life = life;
+    f.dmg = dmg;
+    f.acc = 0;
+    f.hue = hue;
+    this.pushFx(x, y, r, 0.3, hue ? 17 : 16, "", false);
+  }
+
+  stepFields(dt: number) {
+    for (const f of this.fields) {
+      if (!f.alive) continue;
+      f.life -= dt;
+      f.acc += dt;
+      if (f.acc >= 0.16) {
+        f.acc = 0;
+        this.pushFx(f.x, f.y, f.r, 0.18, f.hue ? 17 : 16, "", false);
+        for (const e of this.enemies) {
+          if (!e.alive) continue;
+          if (Math.hypot(e.x - f.x, e.y - f.y) < f.r + e.r) this.hurtEnemy(e, f.dmg * 0.2, 0, 0, true);
+        }
+      }
+      if (f.life <= 0) f.alive = false;
+    }
   }
 
   castDash() {
@@ -1237,20 +1478,21 @@ export class HordeSim {
       const py = Math.cos(ang) * o;
       this.shot(2, this.x + px, this.y + py, vx, vy, 36 + P * 12, 0.78, 14, 0, size * 0.88);
     }
-    for (let i = 1; i <= 3; i++) {
+    for (let i = 1; i <= 8; i++) {
       this.pushFx(
-        this.x + Math.cos(ang) * (36 * i),
-        this.y + Math.sin(ang) * (36 * i),
-        16 + P * 3,
-        0.16,
+        this.x + Math.cos(ang) * (42 * i),
+        this.y + Math.sin(ang) * (42 * i),
+        18 + P * 4,
+        0.22,
         12,
         "",
         false,
         ang,
       );
     }
+    this.spawnLaser(0, ang, 0, 420 + P * 30, 10 + P * 3, 0.18, 12);
     this.purpleCd = purpleCdFor(P);
-    this.shake = Math.max(this.shake, 7);
+    this.shake = Math.max(this.shake, 12);
     this.line = "苍。赫。虚式。";
     sfxSkill("purple");
   }
@@ -1399,6 +1641,40 @@ export class HordeSim {
     }
   }
 
+  drawLasers(ctx: CanvasRenderingContext2D, camx: number, camy: number) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const L of this.lasers) {
+      if (!L.alive) continue;
+      const a = Math.max(0.25, L.life / Math.max(0.05, L.max));
+      const x1 = this.x - camx;
+      const y1 = this.y - camy;
+      const x2 = x1 + Math.cos(L.ang) * L.len;
+      const y2 = y1 + Math.sin(L.ang) * L.len;
+      const col = L.hue === 1 ? "196,76,76" : L.hue === 2 ? "255,120,70" : "126,232,228";
+      ctx.strokeStyle = `rgba(${col},${0.22 * a})`;
+      ctx.lineWidth = L.wide * 3.2;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(${col},${0.7 * a})`;
+      ctx.lineWidth = L.wide * 1.35;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(239,232,216,${0.9 * a})`;
+      ctx.lineWidth = Math.max(2, L.wide * 0.35);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   render(ctx: CanvasRenderingContext2D, w: number, h: number) {
     const atlas = this.atlas;
     const jx = this.shake > 0 ? (Math.random() - 0.5) * this.shake : 0;
@@ -1512,11 +1788,16 @@ export class HordeSim {
         grd.addColorStop(0.45, "rgba(168,132,255,0.78)");
         grd.addColorStop(1, "rgba(239,232,216,0.95)");
         ctx.fillStyle = grd;
+        ctx.globalCompositeOperation = "lighter";
         ctx.beginPath();
-        ctx.ellipse(0, 0, b.r * 6.4, b.r * 0.72, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 0, b.r * 9.2, b.r * 1.15, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "rgba(126,232,228,0.85)";
-        ctx.lineWidth = 2;
+        ctx.fillStyle = "rgba(239,232,216,0.9)";
+        ctx.beginPath();
+        ctx.ellipse(0, 0, b.r * 7.2, b.r * 0.38, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(126,232,228,0.95)";
+        ctx.lineWidth = 3;
         ctx.stroke();
         ctx.restore();
       } else {
@@ -1524,8 +1805,15 @@ export class HordeSim {
         ctx.beginPath();
         ctx.arc(bx, by, b.r, 0, Math.PI * 2);
         ctx.fill();
+        if (b.kind === 1) {
+          ctx.strokeStyle = "rgba(239,232,216,0.55)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
       }
     }
+
+    this.drawLasers(ctx, camx, camy);
 
     const C = this.weps.clone;
     if (C > 0 && atlas) {
@@ -1598,6 +1886,13 @@ export class HordeSim {
             }
             ctx.restore();
           }
+          if (e.mark > 0) {
+            ctx.strokeStyle = `rgba(196,76,76,${0.35 + e.mark})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(ex, ey - 8, e.r + 6, 0, Math.PI * 2);
+            ctx.stroke();
+          }
           if (e.kind === 3 || e.elite || e.hp < e.max) {
             const bw = e.kind === 3 ? 44 : 32;
             ctx.fillStyle = "rgba(8,8,12,0.7)";
@@ -1660,13 +1955,19 @@ export class HordeSim {
       const fx = f.x - camx;
       const fy = f.y - camy;
       if (f.kind === 1 || f.kind === 3) {
-        ctx.strokeStyle = f.kind === 3 ? `rgba(196,76,76,${0.6 * a})` : `rgba(126,232,228,${0.6 * a})`;
-        ctx.lineWidth = 2 + a * 4;
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = f.kind === 3 ? `rgba(196,76,76,${0.75 * a})` : `rgba(126,232,228,${0.75 * a})`;
+        ctx.lineWidth = 3 + a * 6;
         ctx.beginPath();
-        ctx.arc(fx, fy, f.r * (1.15 - a * 0.4), 0, Math.PI * 2);
+        ctx.arc(fx, fy, f.r * (1.2 - a * 0.35), 0, Math.PI * 2);
         ctx.stroke();
+        ctx.fillStyle = f.kind === 3 ? `rgba(196,76,76,${0.12 * a})` : `rgba(126,232,228,${0.12 * a})`;
+        ctx.beginPath();
+        ctx.arc(fx, fy, f.r * (0.7 - a * 0.2), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = "source-over";
       } else if (f.kind === 4) {
-        ctx.fillStyle = `rgba(239,232,216,${0.25 * a})`;
+        ctx.fillStyle = `rgba(239,232,216,${0.38 * a})`;
         ctx.beginPath();
         ctx.arc(fx, fy, f.r * (1 - a), 0, Math.PI * 2);
         ctx.fill();
@@ -1728,21 +2029,81 @@ export class HordeSim {
         ctx.fill();
       } else if (f.kind === 12) {
         ctx.save();
+        ctx.globalCompositeOperation = "lighter";
         ctx.translate(fx, fy);
         ctx.rotate(f.ang);
-        ctx.strokeStyle = `rgba(180,140,255,${0.75 * a})`;
-        ctx.lineWidth = 5 + (1 - a) * 6;
+        ctx.strokeStyle = `rgba(180,140,255,${0.85 * a})`;
+        ctx.lineWidth = 8 + (1 - a) * 10;
         ctx.beginPath();
         ctx.moveTo(-f.r * 1.6, 0);
         ctx.lineTo(f.r * 1.8, 0);
         ctx.stroke();
-        ctx.strokeStyle = `rgba(239,232,216,${0.85 * a})`;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = `rgba(239,232,216,${0.95 * a})`;
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(-f.r, 0);
         ctx.lineTo(f.r * 2.2, 0);
         ctx.stroke();
         ctx.restore();
+      } else if (f.kind === 13) {
+        ctx.fillStyle = `rgba(239,232,216,${0.9 * a})`;
+        ctx.beginPath();
+        ctx.arc(fx + Math.cos(f.ang) * (1 - a) * 16, fy + Math.sin(f.ang) * (1 - a) * 16, 2 + a * 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (f.kind === 14) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.translate(fx, fy);
+        ctx.rotate(f.ang);
+        const col = f.crit ? "196,180,255" : "126,232,228";
+        ctx.strokeStyle = `rgba(${col},${0.95 * a})`;
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.moveTo(-f.r, 0);
+        ctx.lineTo(-f.r * 0.3, 7);
+        ctx.lineTo(f.r * 0.2, -6);
+        ctx.lineTo(f.r, 0);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(239,232,216,${0.8 * a})`;
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+        ctx.restore();
+      } else if (f.kind === 15) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.translate(fx, fy);
+        ctx.rotate(f.ang);
+        ctx.strokeStyle = `rgba(168,140,255,${0.45 * a})`;
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(-f.r, 0);
+        ctx.lineTo(f.r, 0);
+        ctx.stroke();
+        ctx.restore();
+      } else if (f.kind === 16 || f.kind === 17) {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle =
+          f.kind === 17 ? `rgba(196,76,76,${0.7 * a})` : `rgba(126,232,228,${0.7 * a})`;
+        ctx.lineWidth = 3 + a * 3;
+        ctx.beginPath();
+        ctx.arc(fx, fy, f.r * (1.05 - a * 0.15), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle =
+          f.kind === 17 ? `rgba(196,76,76,${0.1 * a})` : `rgba(126,232,228,${0.1 * a})`;
+        ctx.beginPath();
+        ctx.arc(fx, fy, f.r * 0.65, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = "source-over";
+      } else if (f.kind === 18) {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = `rgba(239,232,216,${0.35 * a})`;
+        ctx.beginPath();
+        ctx.arc(fx, fy, f.r * (1.3 - a * 0.4), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = `rgba(126,232,228,${0.7 * a})`;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.globalCompositeOperation = "source-over";
       } else if (f.kind === 2 && f.text) {
         ctx.font = f.crit ? "700 16px IBM Plex Mono, monospace" : "500 12px IBM Plex Mono, monospace";
         ctx.fillStyle = f.crit ? "#efe8d8" : "#7ee8e4";

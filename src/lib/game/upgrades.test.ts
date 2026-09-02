@@ -98,6 +98,19 @@ describe("upgrade picks", () => {
     assert.equal(o.to, 2);
   });
 
+  it("puts 咒痕 and 扫射 in Gojo's verb pool", () => {
+    const weps = emptyWeps();
+    weps.limitless = 1;
+    const picks = rollPicks("gojo", weps, 35, 3, () => 0.4);
+    const ids = picks.map((p) => p.id);
+    assert.ok(ids.some((id) => id === "ripple" || id === "ray" || id === "blue" || id === "red"));
+    const weps2 = emptyWeps();
+    weps2.limitless = 2;
+    weps2.blue = 1;
+    const later = rollPicks("gojo", weps2, 50, 4, () => 0);
+    assert.ok(later.some((p) => p.id === "ripple" || p.id === "ray" || p.tag === "新术"));
+  });
+
   it("returns an empty pool when everything is maxed", () => {
     const weps = emptyWeps();
     for (const id of Object.keys(weps) as (keyof typeof weps)[]) weps[id] = 99;

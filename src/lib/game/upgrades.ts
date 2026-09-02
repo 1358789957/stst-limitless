@@ -15,7 +15,11 @@ export type UpgradeId =
   | "cleave"
   | "flame"
   | "blades"
-  | "sense";
+  | "sense"
+  | "ripple"
+  | "ray"
+  | "plague"
+  | "beam";
 
 export type OfferTag = "新术" | "进化" | "支援" | "合成" | "术域";
 
@@ -44,8 +48,8 @@ function steps(lines: string[]) {
 }
 
 export const VERBS: Record<CharId, UpgradeId[]> = {
-  gojo: ["limitless", "blue", "red", "clone", "purple"],
-  sukuna: ["slash", "cleave", "blades", "flame"],
+  gojo: ["limitless", "blue", "red", "clone", "ripple", "ray", "purple"],
+  sukuna: ["slash", "cleave", "blades", "plague", "beam", "flame"],
 };
 
 export const SUPPORTS: Record<CharId, UpgradeId[]> = {
@@ -104,9 +108,9 @@ export const UPGRADES: UpgradeDef[] = [
     who: ["gojo"],
     role: "verb",
     desc: steps([
-      "E。一根贯穿柱。冷却 5.6 秒。别当普通技砸。",
-      "柱体加宽。还是那一下。",
-      "柱走完炸一圈。",
+      "E。粗激光贯穿。冷却 5.6 秒。别当普通技砸。",
+      "柱更宽，拖一道残影。",
+      "走完炸一圈。",
       "两根并排。收束用。",
     ]),
   },
@@ -174,9 +178,9 @@ export const UPGRADES: UpgradeDef[] = [
     role: "verb",
     desc: steps([
       "E。一矢炸开。冷却 3.1 秒。留着清堆。",
-      "爆炸圈到 62。",
-      "两矢。还是慢。",
-      "两矢巨爆。开完再走。",
+      "爆炸圈到 62。加一条短火柱。",
+      "两矢 + 火柱。还是慢。",
+      "两矢巨爆，火柱加宽。",
     ]),
   },
   {
@@ -214,8 +218,8 @@ export const UPGRADES: UpgradeDef[] = [
     who: "all",
     role: "support",
     desc: steps([
-      "暴击跳 1 个。击杀喷血。",
-      "连锁 2 跳。",
+      "暴击跳 1 个。弧光看得见。",
+      "连锁 2 跳。更远。",
       "连锁 3 跳。黑闪自己找人。",
     ]),
   },
@@ -256,6 +260,62 @@ export const UPGRADES: UpgradeDef[] = [
       "R。全屏必中。冷却 22 秒。留着清场。",
       "冻更久，打更狠。冷却 18 秒。",
       "冷却 15 秒。还是大技。别手痒。",
+    ]),
+  },
+  {
+    id: "ripple",
+    name: "咒痕",
+    kana: "涟",
+    max: 4,
+    who: ["gojo"],
+    role: "verb",
+    desc: steps([
+      "苍命中后跳一圈。蒜味脉冲。",
+      "连跳 2 个。圈更大。",
+      "跳完留一片场。站进去也挨打。",
+      "击杀也会传染。三跳。",
+    ]),
+  },
+  {
+    id: "ray",
+    name: "扫射",
+    kana: "六瞳",
+    max: 4,
+    who: ["gojo"],
+    role: "verb",
+    desc: steps([
+      "自动扫一束激光。短、薄、会转。",
+      "梁更粗。",
+      "扫得更久。",
+      "两束交叉。六瞳锁死。",
+    ]),
+  },
+  {
+    id: "plague",
+    name: "血雾",
+    kana: "厨痕",
+    max: 4,
+    who: ["sukuna"],
+    role: "verb",
+    desc: steps([
+      "捌中的人身上开裂，雾跳到旁边一个。",
+      "跳 2 个。",
+      "雾圈更大。",
+      "解命中也会传染。三跳。",
+    ]),
+  },
+  {
+    id: "beam",
+    name: "光刃",
+    kana: "解线",
+    max: 4,
+    who: ["sukuna"],
+    role: "verb",
+    desc: steps([
+      "一道横扫光刃。薄激光切过屏幕。",
+      "刃更宽。",
+      "扫得更远。",
+      "两道交叉。空气开膛。",
     ]),
   },
 ];
