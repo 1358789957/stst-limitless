@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { HordeGame } from "@/components/game/HordeGame";
 import { StartScreen } from "@/components/game/StartScreen";
 import { resumeAudio, setMuted } from "@/lib/game/audio";
-import type { CharId } from "@/lib/game/characters";
-import { loadMeta, type Meta } from "@/lib/game/meta";
+import { type CharId } from "@/lib/game/characters";
+import { isCharUnlocked, loadMeta, type Meta } from "@/lib/game/meta";
 
 export function GameRoot() {
-  const [phase, setPhase] = useState<"boot" | "menu" | "play">("boot");
+  const [phase, setPhase] = useState<"menu" | "play">("menu");
   const [meta, setMeta] = useState<Meta>(() => loadMeta());
   const [charId, setCharId] = useState<CharId>("gojo");
 
@@ -14,7 +14,6 @@ export function GameRoot() {
     const m = loadMeta();
     setMeta(m);
     setMuted(m.muted);
-    setPhase("menu");
   }, []);
 
   useEffect(() => {
@@ -28,11 +27,13 @@ export function GameRoot() {
   if (phase !== "play") {
     return (
       <StartScreen
-        booting={phase === "boot"}
         meta={meta}
         selected={charId}
         onSelect={setCharId}
+        onMute={(muted) => setMeta((m) => ({ ...m, muted }))}
         onStart={(id) => {
+          const latest = loadMeta();
+          if (!isCharUnlocked(id, latest)) return;
           setCharId(id);
           setPhase("play");
         }}
@@ -44,6 +45,7 @@ export function GameRoot() {
     <HordeGame
       key={charId}
       charId={charId}
+      extraStart={meta.extraStart}
       onExit={() => {
         setMeta(loadMeta());
         setPhase("menu");

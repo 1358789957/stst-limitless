@@ -1,3 +1,5 @@
+import { publicUrl } from "./asset-url.ts";
+
 export type CharId = "gojo" | "sukuna";
 
 export type CharDef = {
@@ -16,6 +18,7 @@ export type CharDef = {
   kit: string[];
   dashName: string;
   dashHint: string;
+  unlockHint?: string;
 };
 
 export const CHARS: CharDef[] = [
@@ -24,34 +27,35 @@ export const CHARS: CharDef[] = [
     name: "5t5",
     title: "最强",
     kana: "LIMITLESS",
-    blurb: "无极把靠近的东西摊平。走位，让术式自己割。",
-    portrait: "/art/hero.png",
+    blurb: "无下限先稠后挡。苍蝇摸不到，灾核照样穿。",
+    portrait: publicUrl("art/hero.png"),
     sprite: "hero",
     accent: "ice",
     start: "limitless",
     line: "吾乃最强。",
-    domainName: "无量空域",
+    domainName: "无量空处",
     hitLine: "碰到了。无极呢？",
-    kit: ["无极", "苍", "赫", "虚式"],
+    kit: ["无下限", "拳脚", "六赫", "苍", "虚式", "咒痕", "无量空处"],
     dashName: "瞬移",
-    dashHint: "无下限踏步，穿过秽物。",
+    dashHint: "Q 踏步。左键拳脚。右键走。",
   },
   {
     id: "sukuna",
     name: "宿傩",
     title: "灾祸",
     kana: "DISMANTLE",
-    blurb: "解把空气切开，捌把靠近的东西拆掉。别站在刀口上。",
-    portrait: "/art/sukuna.jpg",
+    blurb: "捌被动按硬度拆。左键解飞出去。",
+    portrait: publicUrl("art/sukuna.jpg"),
     sprite: "sukuna",
     accent: "blood",
     start: "slash",
     line: "精彩。再跪一次。",
     domainName: "伏魔御厨子",
     hitLine: "被摸到了。开。",
-    kit: ["解", "捌", "开", "厨子"],
+    kit: ["捌", "解", "二连", "开", "厨刀", "魔虚罗", "伏魔御厨子"],
     dashName: "瞬斩",
-    dashHint: "踏过去，沿路切开。",
+    dashHint: "Q 瞬斩。左键解。右键走。升级只加血。",
+    unlockHint: "先活一场。",
   },
 ];
 
