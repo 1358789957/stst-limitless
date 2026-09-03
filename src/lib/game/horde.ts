@@ -48,11 +48,11 @@ export const STARTERS: Record<CharId, UpgradeId[]> = {
   sukuna: ["slash", "cleave"],
 };
 
-export const PUNCH_BASE = 3.2;
-export const RED_BASE = 0.72;
-export const BLUE_BASE = 2.4;
-export const SLASH_BASE = 3.4;
-export const CLEAVE_PCT = 0.03;
+export const PUNCH_BASE = 8.8;
+export const RED_BASE = 4.6;
+export const BLUE_BASE = 6.2;
+export const SLASH_BASE = 8.8;
+export const CLEAVE_PCT = 0.08;
 
 const MAX_E = 200;
 const MAX_B = 280;
@@ -173,8 +173,8 @@ type Fx = {
 
 const KINDS = [
   { hp: 10, spd: 82, dmg: 8, xp: 1, r: 13, h: 48, sprite: "fly" as const },
-  { hp: 32, spd: 58, dmg: 12, xp: 2, r: 18, h: 54, sprite: "mouth" as const },
-  { hp: 48, spd: 118, dmg: 14, xp: 4, r: 15, h: 60, sprite: "blood" as const },
+  { hp: 20, spd: 58, dmg: 12, xp: 2, r: 18, h: 54, sprite: "mouth" as const },
+  { hp: 28, spd: 118, dmg: 14, xp: 4, r: 15, h: 60, sprite: "blood" as const },
   { hp: 520, spd: 44, dmg: 26, xp: 30, r: 36, h: 110, sprite: "disaster" as const },
 ];
 
@@ -203,7 +203,7 @@ function domainCdFor(d: number) {
 }
 
 function redCdFor(rate: number) {
-  return 1.15 / forgeRateMul(rate);
+  return 0.88 / forgeRateMul(rate);
 }
 
 function blueCdFor(rate: number) {
@@ -211,7 +211,7 @@ function blueCdFor(rate: number) {
 }
 
 function cleaveCdFor(rate: number) {
-  return 0.72 / forgeRateMul(rate);
+  return 0.46 / forgeRateMul(rate);
 }
 
 function flameCdFor(f: number) {
@@ -227,11 +227,11 @@ function beamCdFor(lv: number) {
 }
 
 function punchCdFor(rate: number) {
-  return 0.34 / forgeRateMul(rate);
+  return 0.28 / forgeRateMul(rate);
 }
 
 function slashCdFor(rate: number) {
-  return 0.4 / forgeRateMul(rate);
+  return 0.3 / forgeRateMul(rate);
 }
 
 function angDiff(a: number, b: number) {
@@ -924,13 +924,17 @@ export class HordeSim {
   }
 
   cleaveCut(e: Enemy) {
-    const pct = (CLEAVE_PCT + 0.004 * this.weps.power) * shapeMul(this.weps);
+    const pct = (CLEAVE_PCT + 0.006 * this.weps.power) * shapeMul(this.weps);
     let harden = 1;
     if (e.kind === 1) harden = 0.74;
     if (e.kind === 2) harden = 0.58;
     if (e.kind === 3) harden = 0.15;
     if (e.elite && e.kind !== 3) harden *= 0.5;
-    return e.max * pct * harden;
+    let raw = e.max * pct * harden;
+    if (this.fodder(e)) {
+      raw = Math.max(raw, PUNCH_BASE * 0.36 * forgeDamageMul(this.weps.power) * shapeMul(this.weps));
+    }
+    return raw;
   }
 
   adaptFactor(kind: DmgKind) {
@@ -1492,8 +1496,10 @@ export class HordeSim {
         y = rand(0, WORLD);
       }
     }
-    const scale = 1 + this.time / 115 + (this.time > 120 ? (this.time - 120) * 0.01 : 0);
     const elite = Boolean(opts?.elite) || kind === 3;
+    const scale = elite
+      ? 1 + this.time / 90 + (this.time > 120 ? (this.time - 120) * 0.012 : 0)
+      : 1 + this.time / 280;
     e.alive = true;
     e.kind = kind;
     e.x = x;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { CLEAR_TIME, CLEAVE_PCT, HordeSim, PUNCH_BASE, WORLD } from "./horde.ts";
+import { CLEAR_TIME, CLEAVE_PCT, HordeSim, PUNCH_BASE, RED_BASE, WORLD } from "./horde.ts";
 import { forgeDamageMul, levelHp } from "./upgrades.ts";
 
 describe("HordeSim locked kit", () => {
@@ -205,13 +205,16 @@ describe("HordeSim locked kit", () => {
     boss.x = sim.x + 24;
     boss.y = sim.y;
     const base = sim.cleaveCut(fly);
-    assert.ok(Math.abs(base - fly.max * CLEAVE_PCT) < 0.001);
+    assert.ok(base >= fly.max * CLEAVE_PCT);
+    assert.ok(base >= PUNCH_BASE * 0.3);
+    assert.ok(base * 4 >= fly.max);
     sim.lv = 8;
     sim.applyStats();
     assert.equal(sim.cleaveCut(fly), base);
     sim.weps.power = 2;
     assert.ok(sim.cleaveCut(fly) > base);
     assert.ok(sim.cleaveCut(boss) < boss.max * 0.02);
+    assert.ok(sim.cleaveCut(boss) > 4);
     const hpF = fly.hp;
     sim.cd.cleave = 0;
     sim.volleyCleave();
@@ -332,8 +335,9 @@ describe("HordeSim locked kit", () => {
     assert.ok(sukuna.lasers.some((l) => l.alive && l.hue === 1));
   });
 
-  it("3-4 punches kill a wave-1 flyhead", () => {
+  it("two punches kill a wave-1 flyhead; one leaves a sliver", () => {
     const sim = new HordeSim("gojo");
+    sim.crit = 0;
     sim.birth(0, { near: true });
     const e = sim.enemies.find((x) => x.alive)!;
     e.x = sim.x + 18;
@@ -341,13 +345,55 @@ describe("HordeSim locked kit", () => {
     e.max = 10;
     e.hp = 10;
     sim.setAimWorld(e.x, e.y);
-    for (let i = 0; i < 4; i++) {
-      sim.cd.punch = 0;
-      sim.wantFire = true;
-      sim.castActive();
-    }
+    sim.cd.punch = 0;
+    sim.wantFire = true;
+    sim.castActive();
+    assert.equal(sim.punchHits, 1);
+    assert.ok(e.alive);
+    assert.ok(e.hp > 0 && e.hp <= 2.2);
+    sim.cd.punch = 0;
+    sim.castActive();
+    assert.equal(sim.punchHits, 2);
     assert.ok(e.hp <= 0 || !e.alive);
-    assert.ok(sim.punchHits <= 4);
-    assert.ok(sim.punchHits >= 3);
+  });
+
+  it("解 matches punch TTK on a wave-1 flyhead", () => {
+    const sim = new HordeSim("sukuna");
+    sim.crit = 0;
+    sim.birth(0, { near: true });
+    const e = sim.enemies.find((x) => x.alive)!;
+    e.x = sim.x + 24;
+    e.y = sim.y;
+    e.max = 10;
+    e.hp = 10;
+    sim.setAimWorld(e.x, e.y);
+    sim.facing = 0;
+    sim.cd.slash = 0;
+    sim.fireSlash(0);
+    sim.moveBullets(0.08);
+    assert.ok(e.alive);
+    assert.ok(e.hp > 0 && e.hp < e.max);
+    sim.cd.slash = 0;
+    sim.fireSlash(0);
+    sim.moveBullets(0.08);
+    assert.ok(e.hp <= 0 || !e.alive);
+  });
+
+  it("2–3 六赫 bolts kill a wave-1 flyhead", () => {
+    const sim = new HordeSim("gojo");
+    sim.crit = 0;
+    sim.weps.red = 1;
+    sim.weps.more = 0;
+    sim.weps.split = 0;
+    sim.birth(0, { near: true });
+    const e = sim.enemies.find((x) => x.alive)!;
+    e.x = sim.x + 80;
+    e.y = sim.y;
+    e.max = 10;
+    e.hp = 10;
+    const bolt = sim.verbDmg(RED_BASE);
+    assert.ok(bolt < sim.verbDmg(PUNCH_BASE));
+    assert.ok(bolt * 2 < 10 || bolt * 2 >= 9);
+    assert.ok(bolt * 3 >= 10);
   });
 });
