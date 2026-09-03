@@ -1,19 +1,24 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  anvilChainChance,
+  ANVIL_IDS,
   anvilPool,
   emptyWeps,
   forgeDamageMul,
+  HEX_EVERY,
+  hexPool,
   isAnvilId,
+  isHexLevel,
   isMutationId,
+  ladderSkillAt,
   levelHp,
-  MAX_ANVIL_CHAIN,
   MUTATION_IDS,
-  rollPicks,
-  shopClosesOn,
-  shouldChainAnvil,
+  nextLadderSkill,
+  rollForge,
+  rollHex,
+  SKILL_LADDER,
   UPGRADES,
+  xpToReach,
 } from "./upgrades.ts";
 
 function seq(vals: number[]) {
@@ -21,7 +26,7 @@ function seq(vals: number[]) {
   return () => vals[i++ % vals.length]!;
 }
 
-describe("forge bags", () => {
+describe("growth rail", () => {
   it("gives each card distinct rank copy", () => {
     for (const u of UPGRADES) {
       const lines = Array.from({ length: u.max }, (_, n) => u.desc(n + 1));
@@ -41,47 +46,53 @@ describe("forge bags", () => {
     assert.equal(forgeDamageMul(2), 1.3);
   });
 
-  it("anvil pool is 伤害+频率; Gojo also gets Infinity knobs", () => {
+  it("anvil pool is 伤害+频率 plus character knobs, never skills", () => {
     const g = emptyWeps();
     g.limitless = 1;
-    const gojo = anvilPool("gojo", g, 10, 2);
+    const gojo = anvilPool("gojo", g);
     assert.ok(gojo.includes("power"));
     assert.ok(gojo.includes("rate"));
     assert.ok(gojo.includes("infCap"));
     assert.ok(gojo.includes("infRad"));
     assert.ok(!gojo.includes("blue"));
-    const late = anvilPool("gojo", g, 60, 5);
-    assert.ok(late.includes("blue"));
+    assert.ok(!gojo.includes("cleaveN"));
 
     const s = emptyWeps();
     s.slash = 1;
     s.cleave = 1;
-    const sukuna = anvilPool("sukuna", s, 10, 2);
-    assert.deepEqual(sukuna.sort(), ["power", "rate"]);
+    const sukuna = anvilPool("sukuna", s);
+    assert.deepEqual(sukuna.sort(), ["cleaveN", "power", "rate"]);
   });
 
-  it("mixes 专属 and 质变 without forcing one of each", () => {
+  it("rollForge is three anvil shards tagged 锻造", () => {
     const weps = emptyWeps();
     weps.limitless = 1;
     weps.fist = 1;
-    const a = rollPicks("gojo", weps, 8, 2, seq([0.01, 0, 0.01, 0, 0.01, 0]));
-    const b = rollPicks("gojo", weps, 8, 2, seq([0.7, 0, 0.7, 0.2, 0.7, 0.4]));
-    assert.equal(a.length, 3);
-    assert.equal(b.length, 3);
-    assert.ok(a.every((p) => p.tag === "专属" || p.tag === "质变" || p.tag === "支援" || p.tag === "术域" || p.tag === "合成"));
-    assert.ok(!a.some((p) => /苍\+1|解\+1|赫\+1/.test(`${p.name}${p.desc}`)));
+    const picks = rollForge("gojo", weps, seq([0.01, 0.2, 0.8]));
+    assert.equal(picks.length, 3);
+    assert.ok(picks.every((p) => p.tag === "锻造"));
+    assert.ok(picks.every((p) => isAnvilId(p.id)));
+    assert.ok(!picks.some((p) => p.id === "blue" || p.id === "domain" || p.id === "blades"));
+  });
+
+  it("rollHex is three mutations tagged 海克斯", () => {
+    const weps = emptyWeps();
+    const picks = rollHex(weps, seq([0.1, 0.4, 0.9]));
+    assert.equal(picks.length, 3);
+    assert.ok(picks.every((p) => p.tag === "海克斯"));
+    assert.ok(picks.every((p) => isMutationId(p.id)));
+    assert.deepEqual(hexPool(weps), MUTATION_IDS);
   });
 
   it("never offers a skill-rank +damage card", () => {
     const weps = emptyWeps();
     weps.limitless = 1;
     weps.fist = 1;
-    weps.slash = 1;
-    weps.cleave = 1;
     for (let i = 0; i < 20; i++) {
-      const picks = rollPicks("gojo", weps, 20, 3, () => (i * 17 + 3) % 100 / 100);
-      for (const p of picks) {
-        assert.ok(p.id !== "fist");
+      const forge = rollForge("gojo", weps, () => (i * 17 + 3) % 100 / 100);
+      const hex = rollHex(weps, () => (i * 13 + 5) % 100 / 100);
+      for (const p of [...forge, ...hex]) {
+        assert.ok(p.id !== "fist" && p.id !== "red" && p.id !== "domain");
         assert.ok(!/^苍\+/.test(p.name));
         assert.ok(!/^解\+/.test(p.name));
         assert.ok(!/^赫\+/.test(p.name));
@@ -89,27 +100,40 @@ describe("forge bags", () => {
     }
   });
 
-  it("质变 closes the shop; 专属 can chain", () => {
-    assert.equal(shopClosesOn("split"), true);
-    assert.equal(shopClosesOn("more"), true);
-    assert.equal(shopClosesOn("power"), false);
-    assert.equal(shopClosesOn("rate"), false);
-    assert.equal(shopClosesOn("infCap"), false);
-    assert.equal(isAnvilId("power"), true);
-    assert.equal(isMutationId("linger"), true);
+  it("hex levels are 3/6/9", () => {
+    assert.equal(HEX_EVERY, 3);
+    assert.equal(isHexLevel(2), false);
+    assert.equal(isHexLevel(3), true);
+    assert.equal(isHexLevel(6), true);
+    assert.equal(isHexLevel(9), true);
+    assert.equal(isHexLevel(4), false);
   });
 
-  it("chain chance drops and caps at 3 extras", () => {
-    assert.ok(anvilChainChance(0) > anvilChainChance(1));
-    assert.ok(anvilChainChance(1) > anvilChainChance(2));
-    assert.equal(anvilChainChance(3), 0);
-    assert.equal(MAX_ANVIL_CHAIN, 3);
-    assert.equal(shouldChainAnvil(0, () => 0), true);
-    assert.equal(shouldChainAnvil(0, () => 0.99), false);
-    assert.equal(shouldChainAnvil(3, () => 0), false);
+  it("auto ladders land domain at 6", () => {
+    assert.deepEqual(SKILL_LADDER.gojo, ["red", "blue", "purple", "ripple", "domain"]);
+    assert.deepEqual(SKILL_LADDER.sukuna, ["wave", "flame", "blades", "adapt", "domain"]);
+    assert.equal(ladderSkillAt("gojo", 2), "red");
+    assert.equal(ladderSkillAt("gojo", 6), "domain");
+    assert.equal(ladderSkillAt("sukuna", 2), "wave");
+    assert.equal(ladderSkillAt("sukuna", 4), "blades");
+    const weps = emptyWeps();
+    weps.limitless = 1;
+    weps.fist = 1;
+    assert.equal(nextLadderSkill("gojo", weps), "red");
+  });
+
+  it("needs about 182 XP to reach level 6", () => {
+    assert.equal(xpToReach(6), 182);
+    assert.ok(xpToReach(9) > 400);
   });
 
   it("six mutations exist", () => {
     assert.deepEqual(MUTATION_IDS, ["split", "focus", "chain", "more", "size", "linger"]);
+  });
+
+  it("anvil ids do not include kit verbs", () => {
+    assert.ok(!ANVIL_IDS.includes("blue"));
+    assert.ok(!ANVIL_IDS.includes("blades"));
+    assert.ok(ANVIL_IDS.includes("cleaveN"));
   });
 });

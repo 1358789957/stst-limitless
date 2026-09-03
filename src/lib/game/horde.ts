@@ -16,16 +16,19 @@ import {
   fieldMuts,
   forgeDamageMul,
   forgeRateMul,
-  isAnvilId,
+  HEX_EVERY,
+  isHexLevel,
+  ladderSkillAt,
   LEVEL_HP,
   levelHp,
-  MAX_ANVIL_CHAIN,
-  rollPicks,
+  nextLadderSkill,
+  rollForge,
+  rollHex,
   shapeMul,
-  shopClosesOn,
-  shouldChainAnvil,
   UPGRADE_MAP,
+  xpNeed,
   type Offer,
+  type ShopKind,
   type UpgradeId,
 } from "./upgrades.ts";
 
@@ -178,11 +181,6 @@ const KINDS = [
   { hp: 520, spd: 44, dmg: 26, xp: 30, r: 36, h: 110, sprite: "disaster" as const },
 ];
 
-function xpNeed(level: number) {
-  if (level < 5) return 7 + level * 3;
-  return Math.floor(20 * Math.pow(1.24, level - 5));
-}
-
 function orbitCount(lv: number) {
   if (lv <= 0) return 0;
   if (lv >= 4) return 4;
@@ -302,8 +300,9 @@ export type HudSnap = {
     held: DmgKind | null;
     turns: number;
   } | null;
-  anvilChain: number;
-  forgeChain: boolean;
+  shopKind: ShopKind | null;
+  nextSkill: string;
+  nextHex: number;
 };
 
 export type SkillSlot = {
@@ -429,11 +428,13 @@ export class HordeSim {
   adaptTurns = 0;
   adaptPulse = 0;
   lastHurt: DmgKind | null = null;
-  anvilChain = 0;
+  shopQueue: ShopKind[] = [];
+  shopKind: ShopKind | null = null;
   pendingShops = 0;
-  forgeChain = false;
   forgeRng: () => number = Math.random;
   punchHits = 0;
+  slashEcho = 0;
+  slashEchoAng = 0;
 
   enemies: Enemy[] = [];
   bullets: Bullet[] = [];
@@ -491,9 +492,11 @@ export class HordeSim {
       this.weps.cleave = 1;
     }
     if (this.extraStart && this.charId === "gojo") this.weps.red = 1;
-    this.anvilChain = 0;
+    this.shopQueue = [];
+    this.shopKind = null;
     this.pendingShops = 0;
-    this.forgeChain = false;
+    this.slashEcho = 0;
+    this.slashEchoAng = 0;
     this.punchHits = 0;
     this.cd = {};
     this.domainCd = 0;
@@ -713,8 +716,9 @@ export class HordeSim {
         this.charId === "gojo"
           ? (this.cd.punch ?? 0) <= 0
           : this.weps.slash > 0 && (this.cd.slash ?? 0) <= 0,
-      anvilChain: this.anvilChain,
-      forgeChain: this.forgeChain,
+      shopKind: this.shopKind,
+      nextSkill: this.nextSkillName(),
+      nextHex: Math.ceil((this.lv + (isHexLevel(this.lv) ? 1 : 0)) / HEX_EVERY) * HEX_EVERY,
       adapt:
         this.charId === "sukuna" && this.weps.adapt > 0
           ? {
@@ -793,49 +797,52 @@ export class HordeSim {
     this.wantFire = false;
   }
 
+  nextSkillName() {
+    const id = nextLadderSkill(this.charId, this.weps);
+    if (!id) return "—";
+    if (id === "domain") return CHAR_MAP[this.charId].domainName;
+    return UPGRADE_MAP[id].name;
+  }
+
+  grantLadderSkill() {
+    const id = ladderSkillAt(this.charId, this.lv);
+    if (!id) return;
+    if ((this.weps[id] ?? 0) >= 1) return;
+    const def = UPGRADE_MAP[id];
+    this.weps[id] = 1;
+    this.applyStats();
+    const name = id === "domain" ? CHAR_MAP[this.charId].domainName : def.name;
+    this.line = `${name}。到手。`;
+  }
+
   choose(id: UpgradeId) {
     if (!this.picks) return;
     const offer = this.picks.find((p) => p.id === id);
     const def = UPGRADE_MAP[id];
-    if (!def) return;
+    if (!def || !offer) return;
     const lv = (this.weps[id] ?? 0) + 1;
     this.weps[id] = Math.min(def.max, lv);
     this.lastPick = id;
     this.applyStats();
-    this.maybeGrantSixRed();
     sfxLevel();
-    if (shopClosesOn(id)) {
-      this.line = offer ? `${offer.name}。质变收口。` : `${def.name}。收口。`;
-      this.closeShop();
-      return;
+    this.line = this.shopKind === "hex" ? `${def.name}。挂上。` : `${def.name}。入砧。`;
+    if (this.shopQueue[0] === this.shopKind) this.shopQueue.shift();
+    this.picks = null;
+    this.shopKind = null;
+    if (this.shopQueue.length) this.offer();
+    else {
+      this.paused = this.userPaused;
+      this.drainLevels();
     }
-    if (isAnvilId(id)) {
-      if (this.anvilChain >= MAX_ANVIL_CHAIN) {
-        this.line = `${def.name}。砧满了。`;
-        this.closeShop();
-        return;
-      }
-      if (shouldChainAnvil(this.anvilChain, this.forgeRng)) {
-        this.anvilChain += 1;
-        this.forgeChain = true;
-        this.line = `${def.name}。连抽。再锻。`;
-        this.offer({ resume: true });
-        return;
-      }
-      this.line = `${def.name}。专属入砧。`;
-      this.closeShop();
-      return;
-    }
-    this.closeShop();
   }
 
   closeShop() {
     this.picks = null;
-    this.anvilChain = 0;
-    this.forgeChain = false;
-    this.pendingShops = Math.max(0, this.pendingShops - 1);
-    if (this.pendingShops > 0) this.offer();
-    else this.paused = this.userPaused;
+    this.shopKind = null;
+    this.shopQueue = [];
+    this.pendingShops = 0;
+    this.paused = this.userPaused;
+    this.drainLevels();
   }
 
   applyStats() {
@@ -876,14 +883,6 @@ export class HordeSim {
 
   verbDmg(base: number) {
     return base * forgeDamageMul(this.weps.power) * shapeMul(this.weps);
-  }
-
-  maybeGrantSixRed() {
-    if (this.charId !== "gojo" || this.weps.red >= 1) return;
-    if (this.lv >= 2 || this.time >= 20) {
-      this.weps.red = 1;
-      this.line = "六赫。自己会打。";
-    }
   }
 
   shellRadius() {
@@ -1106,6 +1105,7 @@ export class HordeSim {
     if (hit && this.weps.chain > 0) {
       this.queueHop(hit.x, hit.y, this.weps.chain, dmg * 0.75, 1, 96 + this.weps.linger * 18);
     }
+    if (hit && this.weps.ripple > 0) this.spreadRipple(hit.x, hit.y, false);
   }
 
   fireBlue() {
@@ -1132,6 +1132,14 @@ export class HordeSim {
   fireSlash(ang: number) {
     if (this.weps.slash < 1) return;
     if (!this.readyCd("slash", slashCdFor(this.weps.rate))) return;
+    this.slashBurst(ang);
+    if (this.weps.wave > 0) {
+      this.slashEcho = 0.12;
+      this.slashEchoAng = ang + 0.22;
+    }
+  }
+
+  slashBurst(ang: number) {
     const focus = this.weps.focus >= 1;
     const n = focus ? 1 : 1 + this.weps.more;
     const dmg = this.verbDmg(SLASH_BASE);
@@ -1191,7 +1199,6 @@ export class HordeSim {
     }
     const step = Math.min(dt, 0.05);
     this.time += step;
-    this.maybeGrantSixRed();
     this.anim += step;
     this.invuln = Math.max(0, this.invuln - step);
     this.freeze = Math.max(0, this.freeze - step);
@@ -1211,6 +1218,10 @@ export class HordeSim {
     this.adaptPulse = Math.max(0, this.adaptPulse - step);
     this.slashQuiet += step;
     if (this.weps.flash > 0 && this.slashQuiet >= this.flashGap()) this.slashArmed = true;
+    if (this.slashEcho > 0) {
+      this.slashEcho -= step;
+      if (this.slashEcho <= 0) this.slashBurst(this.slashEchoAng);
+    }
     for (const k of Object.keys(this.cd)) {
       this.cd[k] = Math.max(0, (this.cd[k] ?? 0) - step);
     }
@@ -1393,8 +1404,9 @@ export class HordeSim {
   volleyCleave() {
     if (this.weps.cleave < 1) return;
     if (!this.readyCd("cleave", cleaveCdFor(this.weps.rate))) return;
-    const rad = 54 + this.weps.linger * 16 + this.weps.size * 6;
-    const cap = this.weps.focus >= 1 ? 1 : 1 + this.weps.more;
+    const rad = 54 + this.weps.linger * 16 + this.weps.size * 6 + (this.weps.wave > 0 ? 22 : 0);
+    const cap =
+      (this.weps.focus >= 1 ? 1 : 1 + this.weps.more) + this.weps.cleaveN + (this.weps.wave > 0 ? 1 : 0);
     this.cleave(rad, cap);
   }
 
@@ -2212,37 +2224,49 @@ export class HordeSim {
       if (d < 22) {
         g.alive = false;
         this.xp += g.v;
-        while (this.xp >= this.need && !this.paused) {
-          this.xp -= this.need;
-          this.lv += 1;
-          this.need = xpNeed(this.lv - 1);
-          this.pendingShops += 1;
-          this.applyStats();
-          this.hp = Math.min(this.maxHp, this.hp + LEVEL_HP);
-          this.maybeGrantSixRed();
-          if (!this.picks) this.offer();
-        }
+        this.drainLevels();
       }
     }
   }
 
-  offer(opts?: { resume?: boolean }) {
-    if (!opts?.resume) {
-      this.anvilChain = 0;
-      this.forgeChain = false;
+  drainLevels() {
+    while (this.xp >= this.need && !this.picks && !this.over) {
+      this.levelUp();
     }
-    const picks = rollPicks(this.charId, this.weps, this.time, this.lv, this.forgeRng, this.lastPick);
-    if (picks.length === 0) {
-      this.hp = Math.min(this.maxHp, this.hp + 24);
-      this.line = "已经满了。多活一会儿。";
-      this.picks = null;
-      this.paused = this.userPaused;
-      return;
+  }
+
+  levelUp() {
+    this.xp -= this.need;
+    this.lv += 1;
+    this.need = xpNeed(this.lv - 1);
+    this.applyStats();
+    this.hp = Math.min(this.maxHp, this.hp + LEVEL_HP);
+    this.grantLadderSkill();
+    this.shopQueue.push("forge");
+    if (isHexLevel(this.lv)) this.shopQueue.push("hex");
+    this.pendingShops = this.shopQueue.length;
+    if (!this.picks) this.offer();
+  }
+
+  offer() {
+    if (!this.shopQueue.length) this.shopQueue.push("forge");
+    while (this.shopQueue.length) {
+      const kind = this.shopQueue[0]!;
+      const picks = kind === "hex" ? rollHex(this.weps, this.forgeRng) : rollForge(this.charId, this.weps, this.forgeRng);
+      if (picks.length) {
+        this.shopKind = kind;
+        this.picks = picks;
+        this.paused = true;
+        this.line = kind === "hex" ? "海克斯卡。质变挂上。" : "锻造器。一锤。";
+        sfxLevel();
+        return;
+      }
+      this.shopQueue.shift();
     }
-    this.picks = picks;
-    this.paused = true;
-    this.line = this.forgeChain ? "连抽。再锻一次。" : "锻造器。伤已经不随等级涨。";
-    sfxLevel();
+    this.picks = null;
+    this.shopKind = null;
+    this.pendingShops = 0;
+    this.paused = this.userPaused;
   }
 
   contact() {

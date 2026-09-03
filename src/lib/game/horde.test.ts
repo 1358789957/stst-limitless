@@ -16,6 +16,9 @@ describe("HordeSim locked kit", () => {
     assert.equal(sukuna.weps.slash, 1);
     assert.equal(sukuna.weps.cleave, 1);
     assert.equal(sukuna.hud().activeName, "解");
+    assert.equal(sukuna.hud().nextSkill, "二连");
+    assert.equal(gojo.hud().nextSkill, "六赫");
+    assert.equal(gojo.hud().nextHex, 3);
     const w = sukuna.hud().skills.find((s) => s.key === "W");
     assert.equal(w?.name, "捌");
     assert.equal(w?.unlocked, true);
@@ -112,22 +115,27 @@ describe("HordeSim locked kit", () => {
     assert.ok(sukuna.bullets.some((b) => b.alive && b.kind === 4));
   });
 
-  it("grants six 赫 at 20s or first level, not as a pick", () => {
+  it("does not grant six 赫 from a 20s timer", () => {
     const timed = new HordeSim("gojo");
-    timed.time = 19.9;
+    timed.time = 24;
     for (let i = 0; i < 8; i++) timed.tick(0.05);
-    assert.equal(timed.weps.red, 1);
-    timed.cd.red = 0;
-    timed.fire(0.016);
-    assert.ok(timed.bullets.filter((b) => b.alive && b.kind === 1).length >= 6);
+    assert.equal(timed.weps.red, 0);
+    assert.equal(timed.hud().nextSkill, "六赫");
+  });
 
+  it("auto-unlocks the ladder skill on level-up, then opens a forge", () => {
     const leveled = new HordeSim("gojo");
     leveled.xp = leveled.need;
-    leveled.drop(leveled.x, leveled.y, 1);
-    for (let i = 0; i < 8; i++) leveled.gemsStep(0.05);
+    leveled.drainLevels();
+    assert.equal(leveled.lv, 2);
     assert.equal(leveled.weps.red, 1);
+    assert.equal(leveled.shopKind, "forge");
     assert.ok(leveled.picks);
-    assert.ok(!leveled.picks!.some((p) => p.id === "red"));
+    assert.ok(leveled.picks!.every((p) => p.tag === "锻造"));
+    assert.ok(!leveled.picks!.some((p) => p.id === "red" || p.id === "split"));
+    leveled.cd.red = 0;
+    leveled.fire(0.016);
+    assert.ok(leveled.bullets.filter((b) => b.alive && b.kind === 1).length >= 6);
   });
 
   it("level-up adds HP only; punch damage stays until 伤害砧", () => {
@@ -155,43 +163,64 @@ describe("HordeSim locked kit", () => {
     assert.ok(s2.hud().activeMax < s1.hud().activeMax);
   });
 
-  it("质变 closes the forge; 专属 chains only on lucky roll", () => {
-    const end = new HordeSim("gojo");
-    end.offer();
-    end.choose("split");
-    assert.equal(end.picks, null);
-    assert.ok(end.weps.split >= 1);
+  it("every level is one forge; hex only after forge at 3/6/9", () => {
+    const sim = new HordeSim("gojo");
+    sim.xp = sim.need;
+    sim.drainLevels();
+    assert.equal(sim.lv, 2);
+    assert.equal(sim.shopKind, "forge");
+    const a1 = sim.picks![0]!.id;
+    sim.choose(a1);
+    assert.equal(sim.picks, null);
+    assert.ok(sim.weps[a1] >= 1);
 
-    const miss = new HordeSim("gojo");
-    miss.forgeRng = () => 0.99;
-    miss.offer();
-    miss.choose("power");
-    assert.equal(miss.weps.power, 1);
-    assert.equal(miss.picks, null);
-
-    const hit = new HordeSim("gojo");
-    hit.forgeRng = () => 0;
-    hit.offer();
-    hit.choose("rate");
-    assert.equal(hit.weps.rate, 1);
-    assert.ok(hit.picks);
-    assert.equal(hit.forgeChain, true);
-    assert.ok(hit.anvilChain >= 1);
+    sim.xp = sim.need;
+    sim.drainLevels();
+    assert.equal(sim.lv, 3);
+    assert.equal(sim.weps.blue, 1);
+    assert.equal(sim.shopKind, "forge");
+    assert.ok(sim.picks!.every((p) => p.tag === "锻造"));
+    sim.choose(sim.picks![0]!.id);
+    assert.equal(sim.shopKind, "hex");
+    assert.ok(sim.picks!.every((p) => p.tag === "海克斯"));
+    const hexId = sim.picks![0]!.id;
+    sim.choose(hexId);
+    assert.equal(sim.picks, null);
+    assert.ok(sim.weps[hexId] >= 1);
   });
 
-  it("caps anvil extras at 3 then ends", () => {
+  it("level 6 grants domain without a pick, then forge and hex", () => {
     const sim = new HordeSim("gojo");
-    sim.forgeRng = () => 0;
-    sim.offer();
-    sim.choose("power");
-    assert.ok(sim.picks);
-    sim.choose("rate");
-    assert.ok(sim.picks);
-    sim.choose("infCap");
-    assert.ok(sim.picks);
-    sim.choose("infRad");
-    assert.equal(sim.picks, null);
-    assert.equal(sim.anvilChain, 0);
+    while (sim.lv < 6) {
+      sim.xp = sim.need;
+      sim.drainLevels();
+      let guard = 0;
+      while (sim.picks && guard++ < 8) sim.choose(sim.picks[0]!.id);
+    }
+    assert.equal(sim.lv, 6);
+    assert.equal(sim.weps.domain, 1);
+    assert.equal(sim.weps.ripple, 1);
+    assert.equal(sim.weps.purple, 1);
+    assert.ok(!sim.picks || !sim.picks.some((p) => p.id === "domain"));
+  });
+
+  it("Sukuna level 2 grants a second 解 wave", () => {
+    const sim = new HordeSim("sukuna");
+    sim.xp = sim.need;
+    sim.drainLevels();
+    assert.equal(sim.weps.wave, 1);
+    assert.equal(sim.shopKind, "forge");
+    sim.choose(sim.picks![0]!.id);
+    sim.crit = 0;
+    sim.setAimWorld(sim.x + 200, sim.y);
+    sim.facing = 0;
+    sim.cd.slash = 0;
+    sim.fireSlash(0);
+    const first = sim.bullets.filter((b) => b.alive && b.kind === 4).length;
+    assert.ok(first >= 1);
+    for (let i = 0; i < 8; i++) sim.tick(0.02);
+    const after = sim.bullets.filter((b) => b.alive && b.kind === 4).length;
+    assert.ok(after > first);
   });
 
   it("cuts 捌 as percent HP from 伤害砧, not level", () => {

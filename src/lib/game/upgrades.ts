@@ -31,9 +31,12 @@ export type UpgradeId =
   | "power"
   | "rate"
   | "infCap"
-  | "infRad";
+  | "infRad"
+  | "cleaveN"
+  | "wave";
 
-export type OfferTag = "专属" | "质变" | "合成" | "术域" | "支援";
+export type OfferTag = "锻造" | "海克斯";
+export type ShopKind = "forge" | "hex";
 
 export type UpgradeDef = {
   id: UpgradeId;
@@ -55,10 +58,10 @@ export type Offer = {
   desc: string;
 };
 
-export const MAX_ANVIL_CHAIN = 3;
 export const LEVEL_HP = 14;
 export const DAMAGE_SHARD = 0.15;
 export const RATE_SHARD = 0.12;
+export const HEX_EVERY = 3;
 
 function steps(lines: string[]) {
   return (lv: number) => lines[Math.max(0, Math.min(lines.length, lv) - 1)] ?? lines[0]!;
@@ -71,7 +74,12 @@ export const STARTER_IDS: Record<CharId, UpgradeId[]> = {
 
 export const MUTATION_IDS: UpgradeId[] = ["split", "focus", "chain", "more", "size", "linger"];
 
-export const ANVIL_IDS: UpgradeId[] = ["power", "rate", "infCap", "infRad"];
+export const ANVIL_IDS: UpgradeId[] = ["power", "rate", "infCap", "infRad", "cleaveN"];
+
+export const SKILL_LADDER: Record<CharId, UpgradeId[]> = {
+  gojo: ["red", "blue", "purple", "ripple", "domain"],
+  sukuna: ["wave", "flame", "blades", "adapt", "domain"],
+};
 
 export const UPGRADES: UpgradeDef[] = [
   {
@@ -155,13 +163,31 @@ export const UPGRADES: UpgradeDef[] = [
     desc: steps(["左键短打。伤和速度走锻造器。"]),
   },
   {
+    id: "cleaveN",
+    name: "捌数",
+    kana: "多锁",
+    max: 6,
+    who: ["sukuna"],
+    role: "anvil",
+    desc: steps(["砧。捌同时多锁一个。", "再多锁。", "圈里更挤。", "再加一把。", "几乎满手。", "捌数拉满。"]),
+  },
+  {
+    id: "wave",
+    name: "二连",
+    kana: "双斩",
+    max: 1,
+    who: ["sukuna"],
+    role: "kit",
+    desc: steps(["解再甩一道。捌圈更大，多锁一个。"]),
+  },
+  {
     id: "blue",
     name: "苍",
     kana: "顺转",
     max: 1,
     who: ["gojo"],
-    role: "anvil",
-    desc: steps(["获得苍。自动飞出追踪。左键还是拳脚。射速走频率砧。"]),
+    role: "kit",
+    desc: steps(["自动飞出追踪。左键还是拳脚。射速走频率砧。"]),
   },
   {
     id: "red",
@@ -425,143 +451,86 @@ export function isMutationId(id: UpgradeId) {
 }
 
 export function isAnvilId(id: UpgradeId) {
-  return (ANVIL_IDS as string[]).includes(id) || id === "blue";
+  return (ANVIL_IDS as string[]).includes(id);
 }
 
-export function shopClosesOn(id: UpgradeId) {
-  return !isAnvilId(id);
+export function isHexLevel(level: number) {
+  return level >= HEX_EVERY && level % HEX_EVERY === 0;
 }
 
-export function anvilChainChance(extraAlready: number) {
-  if (extraAlready >= MAX_ANVIL_CHAIN) return 0;
-  return [0.48, 0.3, 0.16][extraAlready] ?? 0;
+export function ladderSkillAt(char: CharId, level: number): UpgradeId | null {
+  if (level < 2) return null;
+  return SKILL_LADDER[char][level - 2] ?? null;
 }
 
-export function shouldChainAnvil(extraAlready: number, rng: () => number = Math.random) {
-  return rng() < anvilChainChance(extraAlready);
-}
-
-export function craftId(char: CharId, weps: Record<UpgradeId, number>): UpgradeId | null {
-  if (char === "gojo" && weps.red >= 1 && fieldMuts(weps) >= 3 && weps.purple < 1) return "purple";
-  if (char === "sukuna" && fieldMuts(weps) >= 3 && weps.flame < 1) return "flame";
+export function nextLadderSkill(char: CharId, weps: Record<UpgradeId, number>): UpgradeId | null {
+  for (const id of SKILL_LADDER[char]) {
+    if ((weps[id] ?? 0) < 1) return id;
+  }
   return null;
 }
 
-export function inferTag(id: UpgradeId, _from = 0, asCraft = false): OfferTag {
-  if (asCraft) return "合成";
-  if (id === "domain") return "术域";
-  if (id === "flash" || id === "adapt") return "支援";
-  if (isMutationId(id)) return "质变";
-  return "专属";
+export function xpNeed(level: number) {
+  const early = [22, 28, 36, 44, 52, 68, 88, 112];
+  if (level < early.length) return early[level]!;
+  return Math.floor(112 * Math.pow(1.28, level - 7));
+}
+
+export function xpToReach(level: number) {
+  let n = 0;
+  for (let i = 0; i < level - 1; i++) n += xpNeed(i);
+  return n;
+}
+
+export function inferTag(id: UpgradeId): OfferTag {
+  return isMutationId(id) ? "海克斯" : "锻造";
 }
 
 export function makeOffer(id: UpgradeId, weps: Record<UpgradeId, number>, tag?: OfferTag): Offer {
   const def = UPGRADE_MAP[id];
   const from = weps[id] ?? 0;
   const to = Math.min(def.max, from + 1);
-  const craft = tag === "合成";
   return {
     id,
-    name: craft ? (id === "purple" ? "虚式·合成" : "开·合成") : def.name,
-    kana: craft ? "极致" : def.kana,
-    tag: tag ?? inferTag(id, from),
+    name: def.name,
+    kana: def.kana,
+    tag: tag ?? inferTag(id),
     from,
     to,
-    desc: craft
-      ? id === "purple"
-        ? "突变叠够了。E 开虚式。"
-        : "突变叠够了。E 开火矢。"
-      : def.desc(to),
+    desc: def.desc(to),
   };
 }
 
-export function anvilPool(char: CharId, weps: Record<UpgradeId, number>, time: number, level: number): UpgradeId[] {
+export function anvilPool(char: CharId, weps: Record<UpgradeId, number>): UpgradeId[] {
   const ids: UpgradeId[] = ["power", "rate"];
-  if (char === "gojo") {
-    ids.push("infCap", "infRad");
-    if ((weps.blue ?? 0) < 1 && (level >= 4 || time >= 55)) ids.push("blue");
-  }
+  if (char === "gojo") ids.push("infCap", "infRad");
+  if (char === "sukuna") ids.push("cleaveN");
   return ids.filter((id) => (weps[id] ?? 0) < UPGRADE_MAP[id].max);
 }
 
-export function extraPool(
-  char: CharId,
-  weps: Record<UpgradeId, number>,
-  time: number,
-  level: number,
-): UpgradeId[] {
+export function hexPool(weps: Record<UpgradeId, number>): UpgradeId[] {
+  return MUTATION_IDS.filter((id) => (weps[id] ?? 0) < UPGRADE_MAP[id].max);
+}
+
+function pickN(ids: UpgradeId[], n: number, rng: () => number): UpgradeId[] {
+  const pool = ids.slice();
   const out: UpgradeId[] = [];
-  const craft = craftId(char, weps);
-  if (craft) out.push(craft);
-  if ((weps.flash ?? 0) < UPGRADE_MAP.flash.max && (time >= 28 || level >= 3)) out.push("flash");
-  if (char === "sukuna" && (weps.adapt ?? 0) < UPGRADE_MAP.adapt.max && (time >= 36 || level >= 3)) {
-    out.push("adapt");
+  while (out.length < n && pool.length) {
+    const i = Math.min(pool.length - 1, Math.floor(rng() * pool.length));
+    const id = pool.splice(i, 1)[0];
+    if (id) out.push(id);
   }
-  if ((weps.domain ?? 0) < UPGRADE_MAP.domain.max && (level >= 7 || time >= 95)) out.push("domain");
-  return out.filter((id) => {
-    const def = UPGRADE_MAP[id];
-    if (def.who !== "all" && !def.who.includes(char)) return false;
-    return (weps[id] ?? 0) < def.max;
-  });
+  return out;
 }
 
-function pickFrom(ids: UpgradeId[], rng: () => number, taken: Set<UpgradeId>): UpgradeId | null {
-  const avail = ids.filter((id) => !taken.has(id));
-  if (!avail.length) return null;
-  const i = Math.min(avail.length - 1, Math.floor(rng() * avail.length));
-  return avail[i] ?? null;
-}
-
-export function rollPicks(
+export function rollForge(
   char: CharId,
   weps: Record<UpgradeId, number>,
-  time: number,
-  level: number,
   rng: () => number = Math.random,
-  _lastPick: UpgradeId | null = null,
 ): Offer[] {
-  const taken = new Set<UpgradeId>();
-  const out: Offer[] = [];
-  const anvils = anvilPool(char, weps, time, level);
-  const muts = MUTATION_IDS.filter((id) => (weps[id] ?? 0) < UPGRADE_MAP[id].max);
-  const extras = extraPool(char, weps, time, level);
+  return pickN(anvilPool(char, weps), 3, rng).map((id) => makeOffer(id, weps, "锻造"));
+}
 
-  const add = (id: UpgradeId | null, tag?: OfferTag) => {
-    if (!id || taken.has(id)) return false;
-    taken.add(id);
-    const craft = id === craftId(char, weps);
-    out.push(makeOffer(id, weps, tag ?? inferTag(id, weps[id] ?? 0, craft)));
-    return true;
-  };
-
-  for (let slot = 0; slot < 3; slot++) {
-    const bags: { kind: "anvil" | "mut" | "extra"; ids: UpgradeId[]; w: number }[] = [];
-    if (anvils.some((id) => !taken.has(id))) bags.push({ kind: "anvil", ids: anvils, w: 0.46 });
-    if (muts.some((id) => !taken.has(id))) bags.push({ kind: "mut", ids: muts, w: 0.46 });
-    if (extras.some((id) => !taken.has(id))) bags.push({ kind: "extra", ids: extras, w: 0.08 });
-    if (!bags.length) break;
-    const sum = bags.reduce((n, b) => n + b.w, 0);
-    let r = rng() * sum;
-    let bag = bags[bags.length - 1]!;
-    for (const b of bags) {
-      r -= b.w;
-      if (r <= 0) {
-        bag = b;
-        break;
-      }
-    }
-    const id = pickFrom(bag.ids, rng, taken);
-    if (!id) {
-      const fallback = bags.find((b) => b !== bag && b.ids.some((x) => !taken.has(x)));
-      add(fallback ? pickFrom(fallback.ids, rng, taken) : null);
-      continue;
-    }
-    const craft = id === craftId(char, weps);
-    add(
-      id,
-      bag.kind === "mut" ? "质变" : bag.kind === "anvil" ? "专属" : inferTag(id, weps[id] ?? 0, craft),
-    );
-  }
-
-  return out.slice(0, 3);
+export function rollHex(weps: Record<UpgradeId, number>, rng: () => number = Math.random): Offer[] {
+  return pickN(hexPool(weps), 3, rng).map((id) => makeOffer(id, weps, "海克斯"));
 }

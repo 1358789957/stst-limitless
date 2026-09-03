@@ -19,6 +19,8 @@ function wepChip(id: UpgradeId, lv: number) {
   if (id === "rate") return `频率砧 ${lv}`;
   if (id === "infCap") return `无下限容量 ${lv}`;
   if (id === "infRad") return `无下限半径 ${lv}`;
+  if (id === "cleaveN") return `捌数 ${lv}`;
+  if (id === "wave") return `二连`;
   return `${UPGRADE_MAP[id]?.name ?? id} ${lv}`;
 }
 
@@ -469,6 +471,9 @@ export function HordeGame({
             <p className="mt-1 text-xs tabular-nums text-mute">
               祓除 {hud.kills} · 第 {hud.wave} 波 · Lv. {hud.level}
             </p>
+            <p className="text-[10px] text-mute">
+              下一术 {hud.nextSkill} · 升级后锻造 · 海克斯 3/6/9
+            </p>
             <p className="truncate text-xs text-ice">{hud.line}</p>
             <p className="mt-0.5 text-[10px] text-mute">
               {ice ? "无下限被动 · 左键拳脚" : "捌被动 · 左键解"}
@@ -598,11 +603,12 @@ export function HordeGame({
         <div className="absolute inset-0 z-30 flex items-end justify-center bg-ink/70 p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:items-center">
           <div className="w-full max-w-lg">
             <p className="mb-1 font-display text-xl text-paper">
-              {hud.forgeChain ? "锻造器 · 连抽" : "锻造器"}
+              {hud.shopKind === "hex" ? "海克斯卡" : "锻造器"}
             </p>
             <p className="mb-3 text-xs text-mute">
-              等级只加血。专属入砧有机会再锻。质变收口。
-              {hud.anvilChain > 0 ? ` 已连抽 ${hud.anvilChain}/3。` : ""}
+              {hud.shopKind === "hex"
+                ? "六种质变。自动挂上现有术式。这一级只抽一次。"
+                : "一锤。伤害、频率。没有连抽。"}
             </p>
             <div className="grid gap-2 sm:grid-cols-3">
               {hud.picks.map((p) => {
@@ -622,7 +628,7 @@ export function HordeGame({
                     <p className="mt-1 text-xs tracking-[0.18em] text-ice">{p.kana}</p>
                     <p className="mt-2 text-xs leading-relaxed text-mute">{p.desc}</p>
                     <p className="mt-3 text-xs text-mute">
-                      {p.tag === "质变" ? "质变 · 选完收口" : p.tag === "专属" ? "专属 · 有机会连抽" : p.tag}
+                      {p.tag === "海克斯" ? "海克斯 · 挂上" : "锻造 · 一锤"}
                       {" · "}
                       {p.from} → {p.to}
                     </p>
