@@ -257,6 +257,15 @@ export function HordeGame({
         return sim.hud();
       },
       hud: () => sim.hud(),
+      drainLevels: () => {
+        sim.drainLevels();
+        return sim.hud();
+      },
+      levelUp: () => {
+        sim.xp = sim.need;
+        sim.drainLevels();
+        return sim.hud();
+      },
       setMoveTarget: (x: number, y: number) => sim.setMoveTarget(x, y),
       grant: (id: string, n: number) => {
         sim.weps[id as UpgradeId] = n;
