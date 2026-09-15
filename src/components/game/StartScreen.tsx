@@ -100,7 +100,9 @@ export function StartScreen({
               })}
             </div>
             <div className="mt-4 text-xs text-mute">
-              {meta.extraStart ? "起手加一已开。六赫会先到手。" : "活过一分半或通关，起手再加一。"}
+              {meta.extraStart
+                ? "起手加一已开。黑闪窗口先宽一档。六赫还是 2 级才给。"
+                : "活过一分半或通关，起手再加一：黑闪窗口先开。"}
             </div>
           </div>
         ) : (
@@ -201,7 +203,7 @@ export function StartScreen({
           <p className="text-xs text-mute">
             {archive
               ? "割完再翻。纸比人老实。"
-              : `右键走，按住左键${cur.id === "gojo" ? "拳脚" : "解"}。Q ${cur.dashName}，E ${cur.id === "gojo" ? "虚式" : "开"}，R 术域 · 活过 ${formatClock(CLEAR_TIME)}`}
+              : `右键走，按住左键${cur.id === "gojo" ? "拳脚" : "解"}。Q ${cur.dashName}。W/E/R 按阶梯解锁。黑闪看时机 · 活过 ${formatClock(CLEAR_TIME)}`}
           </p>
           <button
             type="button"

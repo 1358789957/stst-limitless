@@ -21,6 +21,7 @@ function wepChip(id: UpgradeId, lv: number) {
   if (id === "infRad") return `无下限半径 ${lv}`;
   if (id === "cleaveN") return `捌数 ${lv}`;
   if (id === "wave") return `二连`;
+  if (id === "flash") return lv > 1 ? `黑闪 ${lv}` : `黑闪`;
   return `${UPGRADE_MAP[id]?.name ?? id} ${lv}`;
 }
 
@@ -415,6 +416,16 @@ export function HordeGame({
   const ch = CHAR_MAP[hud.charId];
   const ice = ch.accent === "ice";
   const blocking = Boolean(hud.picks || hud.userPaused || hud.over);
+  const slot = (key: "Q" | "W" | "E" | "R") => hud.skills.find((s) => s.key === key);
+  const wHint = ice ? (slot("W")?.unlocked ? "W 六赫" : "W 六赫·2级") : "W 捌";
+  const eHint = ice
+    ? slot("E")?.unlocked
+      ? "E 虚式"
+      : "E 虚式·4级"
+    : slot("E")?.unlocked
+      ? "E 开"
+      : "E 开·3级";
+  const rHint = slot("R")?.unlocked ? "R 术域" : "R 术域·6级";
 
   return (
     <div className="relative h-dvh overflow-hidden bg-ink text-paper" onContextMenu={(e) => e.preventDefault()}>
@@ -485,7 +496,7 @@ export function HordeGame({
             </p>
             <p className="truncate text-xs text-ice">{hud.line}</p>
             <p className="mt-0.5 text-[10px] text-mute">
-              {ice ? "无下限被动 · 左键拳脚" : "捌被动 · 左键解"}
+              {ice ? "无下限被动 · 左键拳脚 · 黑闪看时机" : "捌被动 · 左键解 · 黑闪看时机"}
             </p>
             {ice && (
               <div className="mt-1 flex items-center gap-2">
@@ -605,7 +616,7 @@ export function HordeGame({
       </div>
 
       <p className="pointer-events-none absolute bottom-3 left-1/2 z-10 hidden -translate-x-1/2 text-xs text-mute md:block">
-        右键走 · 按住左键{ice ? "拳脚" : "解"} · Q {ch.dashName} · W {ice ? "六赫" : "捌"} · E {ice ? "虚式" : "开"} · R 术域 · Esc 暂停
+        右键走 · 按住左键{ice ? "拳脚" : "解"} · Q {ch.dashName} · {wHint} · {eHint} · {rHint} · Esc 暂停
       </p>
 
       {hud.picks && (
@@ -734,6 +745,8 @@ declare global {
       finish: (won: boolean) => HudSnap;
       choose: (id: string) => HudSnap;
       hud: () => HudSnap;
+      drainLevels?: () => HudSnap;
+      levelUp?: () => HudSnap;
       setMoveTarget: (x: number, y: number) => void;
       grant: (id: string, n: number) => HudSnap;
       setAimWorld?: (x: number, y: number) => void;

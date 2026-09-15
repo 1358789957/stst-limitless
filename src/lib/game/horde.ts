@@ -37,8 +37,8 @@ export const CLEAR_TIME = 180;
 export const DASH_COOLDOWN = 2.15;
 export const ARRIVE = 12;
 export const EXTRA_START: Record<CharId, UpgradeId> = {
-  gojo: "red",
-  sukuna: "cleave",
+  gojo: "flash",
+  sukuna: "flash",
 };
 
 export const ACTIVE_START: Record<CharId, UpgradeId> = {
@@ -491,7 +491,7 @@ export class HordeSim {
       this.weps.slash = 1;
       this.weps.cleave = 1;
     }
-    if (this.extraStart && this.charId === "gojo") this.weps.red = 1;
+    if (this.extraStart) this.weps.flash = Math.max(this.weps.flash, 1);
     this.shopQueue = [];
     this.shopKind = null;
     this.pendingShops = 0;
@@ -775,7 +775,7 @@ export class HordeSim {
       },
       {
         key: "R",
-        name: ch.domainName.slice(0, 2),
+        name: "术域",
         unlocked: this.weps.domain > 0,
         ready: this.weps.domain > 0 && this.domainCd <= 0,
         cd: this.domainCd,
@@ -987,12 +987,10 @@ export class HordeSim {
   }
 
   openBfWindow() {
-    if (this.weps.flash < 1) return;
     this.bfWindow = Math.max(this.bfWindow, this.flashWindow());
   }
 
   tryBlackFlash(e: Enemy, tag: HitTag) {
-    if (this.weps.flash < 1) return false;
     if (this.bfCd > 0 && this.bfCharges <= 0) return false;
     let open = this.bfWindow > 0;
     if (tag === "rim" || tag === "dash") open = true;
@@ -1217,7 +1215,7 @@ export class HordeSim {
     this.bfPunch = Math.max(0, this.bfPunch - step * 4.2);
     this.adaptPulse = Math.max(0, this.adaptPulse - step);
     this.slashQuiet += step;
-    if (this.weps.flash > 0 && this.slashQuiet >= this.flashGap()) this.slashArmed = true;
+    if (this.slashQuiet >= this.flashGap()) this.slashArmed = true;
     if (this.slashEcho > 0) {
       this.slashEcho -= step;
       if (this.slashEcho <= 0) this.slashBurst(this.slashEchoAng);
@@ -1418,6 +1416,7 @@ export class HordeSim {
     const ang = t ? Math.atan2(t.y - this.y, t.x - this.x) : this.facing;
     const n = F >= 3 ? 2 : 1;
     const size = 8 + F * 2.4;
+    const dmg = this.verbDmg(22 + F * 7);
     for (let i = 0; i < n; i++) {
       const off = n === 1 ? 0 : (i - 0.5) * 0.22;
       this.shot(
@@ -1426,16 +1425,14 @@ export class HordeSim {
         this.y,
         Math.cos(ang + off) * 400,
         Math.sin(ang + off) * 400,
-        22 + F * 7,
+        dmg,
         0.9,
         0,
         0,
         size,
       );
     }
-    if (F >= 2) {
-      this.spawnLaser(2, ang, 0.15, 240 + F * 30, 8 + F * 2.5, 0.28 + F * 0.04, 16 + F * 5);
-    }
+    this.spawnLaser(2, ang, 0.15, 240 + F * 30, 8 + F * 2.5, 0.28 + F * 0.04, this.verbDmg(16 + F * 5));
     sfxSkill("red");
   }
 
@@ -2170,7 +2167,7 @@ export class HordeSim {
       const o = 20;
       const px = -Math.sin(ang) * o;
       const py = Math.cos(ang) * o;
-      this.shot(2, this.x + px, this.y + py, vx, vy, 36 + P * 12, 0.78, 14, 0, size * 0.88);
+      this.shot(2, this.x + px, this.y + py, vx, vy, this.verbDmg(36 + P * 12), 0.78, 14, 0, size * 0.88);
     }
     for (let i = 1; i <= 8; i++) {
       this.pushFx(
@@ -2184,7 +2181,7 @@ export class HordeSim {
         ang,
       );
     }
-    this.spawnLaser(0, ang, 0, 420 + P * 30, 10 + P * 3, 0.18, 12);
+    this.spawnLaser(0, ang, 0, 420 + P * 30, 10 + P * 3, 0.18, this.verbDmg(12 + P * 4));
     this.purpleCd = purpleCdFor(P);
     this.shake = Math.max(this.shake, 12);
     this.line = "苍。赫。虚式。";
@@ -2295,14 +2292,14 @@ export class HordeSim {
     this.invuln = Math.max(this.invuln, 0.55);
     this.pushFx(this.x, this.y, 240 + lv * 20, 0.55, this.charId === "sukuna" ? 3 : 1, "", false);
     if (this.charId === "sukuna") {
-      this.ring(200 + lv * 24, 70 + lv * 26, 3);
+      this.ring(200 + lv * 24, this.verbDmg(70 + lv * 26), 3);
       for (let i = 0; i < 10 + lv * 3; i++) {
         const a = (i / (10 + lv * 3)) * Math.PI * 2;
         this.pushFx(this.x + Math.cos(a) * 80, this.y + Math.sin(a) * 80, 40 + lv * 6, 0.35, 9, "", false, a);
       }
       this.line = `术域展开。${CHAR_MAP.sukuna.domainName}。`;
     } else {
-      this.ring(210 + lv * 20, 80 + lv * 28, 1);
+      this.ring(210 + lv * 20, this.verbDmg(80 + lv * 28), 1);
       this.line = `术域展开。${CHAR_MAP.gojo.domainName}。`;
     }
     sfxDomain();

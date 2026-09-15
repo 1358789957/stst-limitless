@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { CLEAR_TIME, CLEAVE_PCT, HordeSim, PUNCH_BASE, RED_BASE, WORLD } from "./horde.ts";
+import { CLEAR_TIME, CLEAVE_PCT, EXTRA_START, HordeSim, PUNCH_BASE, RED_BASE, WORLD } from "./horde.ts";
 import { forgeDamageMul, levelHp } from "./upgrades.ts";
 
 describe("HordeSim locked kit", () => {
@@ -22,6 +22,28 @@ describe("HordeSim locked kit", () => {
     const w = sukuna.hud().skills.find((s) => s.key === "W");
     assert.equal(w?.name, "捌");
     assert.equal(w?.unlocked, true);
+    const gw = gojo.hud().skills.find((s) => s.key === "W");
+    assert.equal(gw?.unlocked, false);
+    assert.equal(gojo.hud().skills.find((s) => s.key === "R")?.name, "术域");
+  });
+
+  it("extraStart widens Black Flash and does not skip 六赫", () => {
+    assert.equal(EXTRA_START.gojo, "flash");
+    assert.equal(EXTRA_START.sukuna, "flash");
+    const gojo = new HordeSim("gojo", { extraStart: true });
+    assert.equal(gojo.weps.red, 0);
+    assert.equal(gojo.weps.flash, 1);
+    assert.equal(gojo.hud().nextSkill, "六赫");
+    gojo.xp = gojo.need;
+    gojo.drainLevels();
+    assert.equal(gojo.lv, 2);
+    assert.equal(gojo.weps.red, 1);
+    assert.equal(gojo.hud().skills.find((s) => s.key === "W")?.unlocked, true);
+
+    const sukuna = new HordeSim("sukuna", { extraStart: true });
+    assert.equal(sukuna.weps.flash, 1);
+    assert.equal(sukuna.weps.cleave, 1);
+    assert.equal(sukuna.hud().nextSkill, "二连");
   });
 
   it("walks toward a move target and stops on arrival", () => {
@@ -276,8 +298,7 @@ describe("HordeSim locked kit", () => {
 
   it("treats Black Flash as a timing state, not a bounce", () => {
     const sim = new HordeSim("gojo");
-    sim.weps.flash = 2;
-    sim.applyStats();
+    assert.equal(sim.weps.flash, 0);
     sim.castDash();
     for (let i = 0; i < 12; i++) sim.stepDash(0.02);
     assert.ok(sim.bfWindow > 0);
@@ -289,6 +310,28 @@ describe("HordeSim locked kit", () => {
     assert.ok(sim.bfHits >= 1);
     assert.ok(sim.bfBuff > 0);
     assert.equal(sim.chains.filter((c) => c.kind === 0).length, 0);
+  });
+
+  it("extraStart Black Flash window is wider than the base state", () => {
+    const base = new HordeSim("gojo");
+    const extra = new HordeSim("gojo", { extraStart: true });
+    assert.ok(extra.flashWindow() > base.flashWindow());
+    assert.ok(extra.bfMult() > base.bfMult());
+  });
+
+  it("开 at unlock is a fire beam that eats 伤害砧", () => {
+    const a = new HordeSim("sukuna");
+    const b = new HordeSim("sukuna");
+    a.weps.flame = 1;
+    b.weps.flame = 1;
+    b.weps.power = 2;
+    a.castE();
+    b.castE();
+    assert.ok(a.lasers.some((l) => l.alive && l.hue === 2));
+    assert.ok(b.lasers.some((l) => l.alive && l.hue === 2));
+    const da = a.bullets.find((x) => x.alive && x.kind === 5)!.dmg;
+    const db = b.bullets.find((x) => x.alive && x.kind === 5)!.dmg;
+    assert.ok(db > da);
   });
 
   it("turns Sukuna's wheel after repeated contact", () => {

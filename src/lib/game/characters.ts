@@ -37,7 +37,7 @@ export const CHARS: CharDef[] = [
     hitLine: "碰到了。无极呢？",
     kit: ["无下限", "拳脚", "六赫", "苍", "虚式", "咒痕", "无量空处"],
     dashName: "瞬移",
-    dashHint: "Q 踏步。左键拳脚。右键走。",
+    dashHint: "Q 踏步。左键拳脚。右键走。黑闪看时机。",
   },
   {
     id: "sukuna",
@@ -54,7 +54,7 @@ export const CHARS: CharDef[] = [
     hitLine: "被摸到了。开。",
     kit: ["捌", "解", "二连", "开", "厨刀", "魔虚罗", "伏魔御厨子"],
     dashName: "瞬斩",
-    dashHint: "Q 瞬斩。左键解。右键走。升级只加血。",
+    dashHint: "Q 瞬斩。左键解。右键走。升级只加血。黑闪看时机。",
     unlockHint: "先活一场。",
   },
 ];

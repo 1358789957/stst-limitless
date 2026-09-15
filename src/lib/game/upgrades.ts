@@ -241,7 +241,11 @@ export const UPGRADES: UpgradeDef[] = [
     max: 3,
     who: "all",
     role: "support",
-    desc: steps(["对上了。Q 后、无极外沿、或斩的第一刀。黑一下。", "窗口更宽更长。", "还能再黑一次。对间距。"]),
+    desc: steps([
+      "对上了。Q 后、无极外沿、或斩的第一刀。黑一下。人人都有，起手加一先宽一档。",
+      "窗口更宽更长。",
+      "还能再黑一次。对间距。",
+    ]),
   },
   {
     id: "adapt",

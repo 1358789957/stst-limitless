@@ -68,14 +68,16 @@ cardMul:
 捌:
 
 ```
-tick = targetMaxHp * (0.03 + 0.004 * damageForgeStacks) * size/merge mul
+tick = targetMaxHp * (0.08 + 0.006 * damageForgeStacks) * size/merge mul
 ```
 
-then × simultaneous count at frequency in range. Frequency only from anvil.
+then × simultaneous count at frequency in range. Fodder also has a punch-scaled floor so flies die in a few ticks. Frequency only from anvil.
 
 ## Black Flash / Mahoraga
 
-Black Flash = timing STATE (after dash, Infinity rim, first frame slash after gap), screen punch, short next-hit buff. NOT bounce. 咒痕/血雾 stay spread.
+Black Flash = timing STATE from minute 0 (after dash, Infinity rim, first frame slash after gap), screen punch, short next-hit buff. NOT bounce. It is not a shop card and not a ladder skill. 咒痕 stays the Gojo spread verb; hex 连锁 hops for both.
+
+extraStart (90s or clear) widens the window (`flash` rank 1). It does **not** grant 六赫. Level 2 is still the 六赫 beat for everyone.
 
 Mahoraga = Sukuna level-5 ladder unlock: adapt by damage kind (contact / projectile / laser / explosion).
 
@@ -85,4 +87,4 @@ Remove old “upgrade 苍/赫/解 rank” and raw +damage skill picks.
 
 ## Acceptance
 
-Can move and 平A immediately. Gojo surround-safe at start; punches are 平A; six 赫 arrive at level 2. Sukuna 捌 ticks, 解 is LMB. Level thickens HP and unlocks the next ladder skill; damage only after anvil 伤害. Every level is one forge. Hex only at 3/6/9. No mixed 专属/质变 bag, no anvil chain, no “upgrade 苍” cards.
+Can move and 平A immediately. Gojo surround-safe at start; punches are 平A; six 赫 arrive at level 2 even if extraStart is on. Sukuna 捌 ticks, 解 is LMB. Level thickens HP and unlocks the next ladder skill; damage only after anvil 伤害. Every level is one forge. Hex only at 3/6/9. Black Flash fires after Q without a grant. No mixed 专属/质变 bag, no anvil chain, no “upgrade 苍” cards.
