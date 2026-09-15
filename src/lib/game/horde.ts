@@ -870,7 +870,7 @@ export class HordeSim {
   }
 
   flashWindow() {
-    return 0.18 + this.weps.flash * 0.14;
+    return 0.42 + this.weps.flash * 0.18;
   }
 
   flashBuff() {

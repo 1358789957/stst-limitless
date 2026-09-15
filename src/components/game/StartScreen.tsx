@@ -57,7 +57,14 @@ export function StartScreen({
                 {meta.cleared ? " · 通关" : ""}
               </p>
             )}
-            <div className="flex gap-2">
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                onClick={() => setArchive((v) => !v)}
+                className="h-10 shrink-0 rounded-md border border-line bg-ink-2 px-3 text-xs text-paper"
+              >
+                {archive ? "返回" : "档案"}
+              </button>
               <button
                 type="button"
                 aria-label={meta.muted ? "打开声音" : "静音"}
@@ -68,16 +75,9 @@ export function StartScreen({
                   if (!next) unlockAudio();
                   onMute?.(next);
                 }}
-                className="flex size-10 items-center justify-center rounded-md border border-line bg-ink-2"
+                className="flex size-10 shrink-0 items-center justify-center rounded-md border border-line bg-ink-2"
               >
                 {meta.muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => setArchive((v) => !v)}
-                className="h-10 rounded-md border border-line bg-ink-2 px-3 text-xs text-paper"
-              >
-                档案
               </button>
             </div>
           </div>
@@ -114,17 +114,9 @@ export function StartScreen({
               return (
                 <div
                   key={c.id}
-                  role="button"
-                  tabIndex={0}
                   onClick={() => {
                     unlockAudio();
                     onSelect(c.id);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onSelect(c.id);
-                    }
                   }}
                   className={cn(
                     "relative flex min-h-40 cursor-pointer overflow-hidden rounded-xl border text-left sm:min-h-80",

@@ -315,6 +315,7 @@ describe("HordeSim locked kit", () => {
   it("extraStart Black Flash window is wider than the base state", () => {
     const base = new HordeSim("gojo");
     const extra = new HordeSim("gojo", { extraStart: true });
+    assert.ok(base.flashWindow() >= 0.4);
     assert.ok(extra.flashWindow() > base.flashWindow());
     assert.ok(extra.bfMult() > base.bfMult());
   });

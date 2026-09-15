@@ -475,9 +475,10 @@ export function nextLadderSkill(char: CharId, weps: Record<UpgradeId, number>): 
 }
 
 export function xpNeed(level: number) {
-  const early = [22, 28, 36, 44, 52, 68, 88, 112];
+  const early = [48, 64, 82, 102, 126, 160, 200, 250];
   if (level < early.length) return early[level]!;
-  return Math.floor(112 * Math.pow(1.28, level - 7));
+  const last = early[early.length - 1]!;
+  return Math.floor(last * Math.pow(1.28, level - (early.length - 1)));
 }
 
 export function xpToReach(level: number) {

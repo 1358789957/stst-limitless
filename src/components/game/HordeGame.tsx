@@ -473,7 +473,7 @@ export function HordeGame({
         </div>
       )}
 
-      <header className="pointer-events-none absolute inset-x-0 top-0 z-10 px-4 pt-[max(0.55rem,env(safe-area-inset-top))]">
+      <header className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-ink/85 via-ink/40 to-transparent px-4 pt-[max(0.55rem,env(safe-area-inset-top))] pb-8">
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <div className="h-2 overflow-hidden rounded-full bg-ink-3">
@@ -488,14 +488,14 @@ export function HordeGame({
                 style={{ width: `${Math.max(0, (hud.xp / Math.max(1, hud.need)) * 100)}%` }}
               />
             </div>
-            <p className="mt-1 text-xs tabular-nums text-mute">
+            <p className="mt-1 text-xs tabular-nums text-paper/80">
               祓除 {hud.kills} · 第 {hud.wave} 波 · Lv. {hud.level}
             </p>
-            <p className="text-[10px] text-mute">
+            <p className="text-[11px] text-paper/75">
               下一术 {hud.nextSkill} · 升级后锻造 · 海克斯 3/6/9
             </p>
             <p className="truncate text-xs text-ice">{hud.line}</p>
-            <p className="mt-0.5 text-[10px] text-mute">
+            <p className="mt-0.5 text-[11px] text-paper/70">
               {ice ? "无下限被动 · 左键拳脚 · 黑闪看时机" : "捌被动 · 左键解 · 黑闪看时机"}
             </p>
             {ice && (

@@ -48,7 +48,7 @@ Gojo: 无下限 + 拳脚 → 2 六赫 → 3 苍 → 4 虚式 → 5 咒痕 → 6 
 
 Sukuna: 捌 + 解 → 2 二连 (second 解 + 捌 range/multi) → 3 开 → 4 厨刀 → 5 魔虚罗 → 6 伏魔御厨子
 
-XP: about 182 to hit level 6 (22 / 28 / 36 / 44 / 52). A normal run lands around 1:45–2:15. Level 9 is snowball-only.
+XP: 422 to hit level 6 (48 / 64 / 82 / 102 / 126). A surround-farm Infinity run was hitting 8 at 1:23 on the old 182 curve. This one lands 6 around 1:45–2:15. Level 9 is snowball-only.
 
 ## Damage formula (damage from anvil stacks, NOT level)
 

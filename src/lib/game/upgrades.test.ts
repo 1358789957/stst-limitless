@@ -122,9 +122,9 @@ describe("growth rail", () => {
     assert.equal(nextLadderSkill("gojo", weps), "red");
   });
 
-  it("needs about 182 XP to reach level 6", () => {
-    assert.equal(xpToReach(6), 182);
-    assert.ok(xpToReach(9) > 400);
+  it("needs about 422 XP to reach level 6", () => {
+    assert.equal(xpToReach(6), 422);
+    assert.ok(xpToReach(9) > 800);
   });
 
   it("six mutations exist", () => {

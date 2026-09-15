@@ -3,11 +3,11 @@ import { HordeGame } from "@/components/game/HordeGame";
 import { StartScreen } from "@/components/game/StartScreen";
 import { resumeAudio, setMuted } from "@/lib/game/audio";
 import { type CharId } from "@/lib/game/characters";
-import { isCharUnlocked, loadMeta, type Meta } from "@/lib/game/meta";
+import { defaultMeta, isCharUnlocked, loadMeta, type Meta } from "@/lib/game/meta";
 
 export function GameRoot() {
   const [phase, setPhase] = useState<"menu" | "play">("menu");
-  const [meta, setMeta] = useState<Meta>(() => loadMeta());
+  const [meta, setMeta] = useState<Meta>(defaultMeta);
   const [charId, setCharId] = useState<CharId>("gojo");
 
   useEffect(() => {
@@ -34,6 +34,7 @@ export function GameRoot() {
         onStart={(id) => {
           const latest = loadMeta();
           if (!isCharUnlocked(id, latest)) return;
+          setMeta(latest);
           setCharId(id);
           setPhase("play");
         }}
