@@ -8,6 +8,8 @@ node_modules/
 artifacts/
 screenshots/
 dist/
+dist-static/
+*.zip
 *.log
 .env
 .env.*

@@ -13,6 +13,7 @@ export const Route = createRootRoute({
       { title: APP_NAME },
       { name: "theme-color", content: "#08080c" },
       { name: "description", content: "5t5 顶视角割草。走位，叠术式，把涌上来的秽物割平。" },
+      { name: "google", content: "notranslate" },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
@@ -26,7 +27,7 @@ export const Route = createRootRoute({
     ],
   }),
   component: () => (
-    <html lang="zh-CN" className="antialiased" suppressHydrationWarning>
+    <html lang="zh-CN" className="antialiased" translate="no" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>

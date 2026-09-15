@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@source "./**/*.{ts,tsx}";
+@source "../static/**/*.{ts,tsx}";
 
 @theme {
   --font-sans: "Noto Sans SC", "Segoe UI", system-ui, sans-serif;

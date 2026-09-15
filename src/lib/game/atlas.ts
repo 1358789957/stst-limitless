@@ -1,3 +1,5 @@
+import { publicUrl } from "./asset-url.ts";
+
 export type Atlas = {
   hero: HTMLImageElement[];
   heroWalk: HTMLImageElement[];
@@ -24,7 +26,9 @@ function loadImg(src: string) {
 }
 
 function frames(folder: string, prefix = "idle") {
-  return Promise.all([1, 2, 3, 4].map((i) => loadImg(`/sprites/${folder}/${prefix}-${i}.png`)));
+  return Promise.all(
+    [1, 2, 3, 4].map((i) => loadImg(publicUrl(`sprites/${folder}/${prefix}-${i}.png`))),
+  );
 }
 
 export async function loadAtlas(): Promise<Atlas> {
@@ -41,7 +45,7 @@ export async function loadAtlas(): Promise<Atlas> {
       frames("orb"),
       frames("slash"),
       frames("gore"),
-      loadImg("/sprites/floor.jpg"),
+      loadImg(publicUrl("sprites/floor.jpg")),
     ]);
   return {
     hero,
